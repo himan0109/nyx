@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+templates/skribble/cloudflared
+templates/skribble/captures.json
+templates/skribble/logo.gif
+templates/skribble/leaflet.js
+templates/skribble/leaflet.css

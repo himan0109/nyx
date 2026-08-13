@@ -1,0 +1,42 @@
+tools_root: "/mnt/458 GB Volume/Projects/tools"
+
+tool_paths:
+  sherlock: "/mnt/458 GB Volume/Projects/tools/sherlock"
+  holehe: "/mnt/458 GB Volume/Projects/tools/holehe"
+  zphisher: "/mnt/458 GB Volume/Projects/tools/zphisher"
+  camphish: "/mnt/458 GB Volume/Projects/tools/CamPhish"
+  seeker: "/mnt/458 GB Volume/Projects/tools/seeker"
+  sayhello: "/mnt/458 GB Volume/Projects/tools/sayhello"
+  facad1ng: "/mnt/458 GB Volume/Projects/tools/Facad1ng"
+  exploit_qrgen: "/mnt/458 GB Volume/Projects/tools/exploit-qrgen"
+  keydroid: "/mnt/458 GB Volume/Projects/tools/keydroid"
+  whspdefendor: "/mnt/458 GB Volume/Projects/tools/whspdefendor"
+  exiftool: "/mnt/458 GB Volume/Projects/tools/exiftool"
+  ipgeoloc: "/mnt/458 GB Volume/Projects/tools/IPGeoLocation"
+  ominis: "/mnt/458 GB Volume/Projects/tools/Ominis-OSINT"
+  autopsy: "/mnt/458 GB Volume/Projects/tools/autopsy"
+  insta_breaker: "/mnt/458 GB Volume/Projects/tools/insta-breaker"
+  debian_tools: "/mnt/458 GB Volume/Projects/tools/Debian-Hacking-Tools"
+  auto_domain: "/mnt/458 GB Volume/Projects/AutoDomainSearch"
+  unsecured_api: "/mnt/458 GB Volume/Projects/UnsecuredAPIKeys.Lite"
+  apks: "/mnt/458 GB Volume/Projects/tools/apks"
+  deepfacelab: "/mnt/458 GB Volume/Projects/tools/DeepFaceLab"
+  deep_live_cam: "/mnt/458 GB Volume/Projects/tools/Deep-Live-Cam"
+
+notify:
+  telegram_token: ""
+  telegram_chat_id: ""
+  discord_webhook: ""
+
+tunnel:
+  provider: ngrok   # or: cloudflared
+  auth_token: ""
+  port: 8080
+
+output:
+  sessions_dir: "/mnt/458 GB Volume/Projects/nyx/output/sessions"
+
+wordlists:
+  rockyou: "/usr/share/wordlists/rockyou.txt"
+  common: "/usr/share/wordlists/common.txt"
+  custom: "/mnt/458 GB Volume/Projects/nyx/wordlists/custom.txt"

@@ -1,0 +1,10 @@
+{
+  "module": "osint.username",
+  "target": "testuser",
+  "timestamp": "2026-08-13T11:16:42",
+  "accounts_found": 1,
+  "accounts": [
+    "https://sherlockproject.xyz/installation"
+  ],
+  "raw_stderr": ""
+}
