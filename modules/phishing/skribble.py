@@ -323,9 +323,20 @@ function poll(){
 }
 document.addEventListener('DOMContentLoaded',function(){
   try{
-    map=L.map('map',{attributionControl:false,zoomSnap:0.5,wheelPxPerZoomLevel:120}).setView([20,78],5);
-    L.tileLayer('/tiles/{z}/{x}/{y}',{maxZoom:19,keepBuffer:4,updateWhenZooming:false,updateWhenIdle:true}).addTo(map);
-    setTimeout(function(){map.invalidateSize();},300);
+    var FetchTileLayer=L.TileLayer.extend({
+      createTile:function(coords,done){
+        var tile=document.createElement('img');
+        var url='/tiles/'+coords.z+'/'+coords.x+'/'+coords.y;
+        fetch(url).then(function(r){return r.blob();}).then(function(blob){
+          tile.src=URL.createObjectURL(blob);done(null,tile);
+        }).catch(function(e){done(e,tile);});
+        return tile;
+      }
+    });
+    map=L.map('map',{attributionControl:false,zoomSnap:0.5,wheelPxPerZoomLevel:120,preferCanvas:false}).setView([20,78],5);
+    new FetchTileLayer('',{maxZoom:19,tileSize:256}).addTo(map);
+    setTimeout(function(){map.invalidateSize();},200);
+    setTimeout(function(){map.invalidateSize();},800);
   }catch(err){console.error('map init failed',err);}
   poll();
   setInterval(poll,2000);
