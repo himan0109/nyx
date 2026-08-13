@@ -186,7 +186,7 @@ DASH_HTML = """<!DOCTYPE html>
 html,body{width:100%;height:100%;overflow:hidden;background:#0d1117;color:#e6edf3;font-family:'Segoe UI',sans-serif}
 body{display:flex}
 #map{flex:1;height:100vh;background:#1a1f2e}
-.dark-tiles{filter:brightness(0.5) saturate(0.6) invert(1) hue-rotate(200deg)}
+.leaflet-tile-pane{filter:brightness(0.5) saturate(0.6) invert(1) hue-rotate(200deg)}
 #sidebar{width:340px;min-width:280px;background:#161b22;display:flex;flex-direction:column;border-left:1px solid #30363d;overflow:hidden;height:100vh}
 .hdr{padding:14px 16px;border-bottom:1px solid #30363d;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
 .brand{font-size:1.1rem;font-weight:700;color:#58a6ff}
@@ -284,7 +284,7 @@ function poll(){
 document.addEventListener('DOMContentLoaded',function(){
   try{
     map=L.map('map',{attributionControl:false,zoomSnap:0.5,wheelPxPerZoomLevel:120}).setView([20,78],5);
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,keepBuffer:4,updateWhenZooming:false,updateWhenIdle:true,className:'dark-tiles'}).addTo(map);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,keepBuffer:4,updateWhenZooming:false,updateWhenIdle:true}).addTo(map);
     setTimeout(function(){map.invalidateSize();},300);
   }catch(err){console.error('map init failed',err);}
   poll();
