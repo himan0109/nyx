@@ -283,7 +283,7 @@ function poll(){
 document.addEventListener('DOMContentLoaded',function(){
   try{
     map=L.map('map',{attributionControl:false,zoomSnap:0.5,wheelPxPerZoomLevel:120}).setView([20,78],5);
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,keepBuffer:4,updateWhenZooming:false,updateWhenIdle:true}).addTo(map);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{maxZoom:19,keepBuffer:4,updateWhenZooming:false,updateWhenIdle:true,subdomains:'abcd'}).addTo(map);
     setTimeout(function(){map.invalidateSize();},300);
   }catch(err){console.error('map init failed',err);}
   poll();
