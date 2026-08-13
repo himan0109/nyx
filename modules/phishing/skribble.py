@@ -283,7 +283,7 @@ function poll(){
 document.addEventListener('DOMContentLoaded',function(){
   try{
     map=L.map('map',{attributionControl:false,zoomSnap:0.5,wheelPxPerZoomLevel:120}).setView([20,78],5);
-    L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',{maxZoom:16,keepBuffer:4,updateWhenZooming:false,updateWhenIdle:true}).addTo(map);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,keepBuffer:4,updateWhenZooming:false,updateWhenIdle:true}).addTo(map);
     setTimeout(function(){map.invalidateSize();},300);
   }catch(err){console.error('map init failed',err);}
   poll();
