@@ -320,14 +320,16 @@ function poll(){
     else if(map&&newOnes.length>1){var gps=newOnes.filter(function(c){return c.lat!=null;});if(gps.length>0){var b=L.latLngBounds(gps.map(function(c){return[c.lat,c.lon];}));map.fitBounds(b,{padding:[60,60],animate:true,duration:1.0,maxZoom:13});}}
   }).catch(function(e){setOk(false);console.error('poll error',e);});
 }
+// Poll runs immediately — no dependency on map or Leaflet
+poll();
+setInterval(poll,2000);
+// Map init runs after layout is ready
 document.addEventListener('DOMContentLoaded',function(){
   try{
     map=L.map('map',{attributionControl:false,zoomSnap:0.5,wheelPxPerZoomLevel:120}).setView([20,78],5);
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{maxZoom:19,keepBuffer:4,updateWhenZooming:false,updateWhenIdle:true,subdomains:'abcd'}).addTo(map);
     setTimeout(function(){map.invalidateSize();},300);
   }catch(err){console.error('map init failed',err);}
-  poll();
-  setInterval(poll,2000);
 });
 </script>
 </body>
