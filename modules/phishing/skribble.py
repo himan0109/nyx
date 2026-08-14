@@ -219,7 +219,7 @@ DASH_HTML = """<!DOCTYPE html>
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{width:100%;height:100%;overflow:hidden;background:#0d1117;color:#e6edf3;font-family:'Segoe UI',sans-serif}
 body{display:flex}
-#map{flex:1;height:100vh;background:#0d1117}
+#map{flex:1;height:100vh;background:#0a0f1e}.leaflet-container{background:#0a0f1e!important}
 #sidebar{width:340px;min-width:280px;background:#161b22;display:flex;flex-direction:column;border-left:1px solid #30363d;overflow:hidden;height:100vh}
 .hdr{padding:14px 16px;border-bottom:1px solid #30363d;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
 .brand{font-size:1.1rem;font-weight:700;color:#58a6ff}
@@ -323,20 +323,13 @@ function poll(){
 }
 document.addEventListener('DOMContentLoaded',function(){
   try{
-    var FetchTileLayer=L.TileLayer.extend({
-      createTile:function(coords,done){
-        var tile=document.createElement('img');
-        var url='/tiles/'+coords.z+'/'+coords.x+'/'+coords.y;
-        fetch(url).then(function(r){return r.blob();}).then(function(blob){
-          tile.src=URL.createObjectURL(blob);done(null,tile);
-        }).catch(function(e){done(e,tile);});
-        return tile;
-      }
+    map=L.map('map',{attributionControl:false,zoomSnap:0.5,wheelPxPerZoomLevel:120,worldCopyJump:true}).setView([20,20],2);
+    fetch('/world.geojson').then(function(r){return r.json();}).then(function(geo){
+      L.geoJSON(geo,{
+        style:{fillColor:'#1c2333',fillOpacity:1,color:'#2d3748',weight:0.8}
+      }).addTo(map);
     });
-    map=L.map('map',{attributionControl:false,zoomSnap:0.5,wheelPxPerZoomLevel:120,preferCanvas:false}).setView([20,78],5);
-    new FetchTileLayer('',{maxZoom:19,tileSize:256}).addTo(map);
     setTimeout(function(){map.invalidateSize();},200);
-    setTimeout(function(){map.invalidateSize();},800);
   }catch(err){console.error('map init failed',err);}
   poll();
   setInterval(poll,2000);
@@ -404,6 +397,13 @@ def run(redirect_url: str):
     @dash_app.route('/leaflet.css')
     def dash_leafletcss():
         return Response(lcss, mimetype='text/css',
+                        headers={'Cache-Control': 'public, max-age=86400'})
+
+    @dash_app.route('/world.geojson')
+    def dash_world():
+        p = os.path.join(TEMPLATE_DIR, 'world.geojson')
+        with open(p) as f: data = f.read()
+        return Response(data, mimetype='application/json',
                         headers={'Cache-Control': 'public, max-age=86400'})
 
     @dash_app.route('/tiles/<int:z>/<int:x>/<int:y>')
