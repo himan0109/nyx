@@ -407,8 +407,8 @@ def run(redirect_url: str):
         except Exception: pass
         return {'ok': True}
 
-    threading.Thread(target=lambda: phish_app.run(host='0.0.0.0', port=PHISH_PORT, threaded=True, debug=False, use_reloader=False), daemon=True).start()
-    threading.Thread(target=lambda: dash_app.run(host='0.0.0.0', port=DASH_PORT, threaded=True, debug=False, use_reloader=False), daemon=True).start()
+    threading.Thread(target=lambda: phish_app.run(host='0.0.0.0', port=PHISH_PORT, threaded=True, debug=False, use_reloader=False), daemon=False).start()
+    threading.Thread(target=lambda: dash_app.run(host='0.0.0.0', port=DASH_PORT, threaded=True, debug=False, use_reloader=False), daemon=False).start()
 
     time.sleep(2)
 
