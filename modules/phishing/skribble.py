@@ -294,7 +294,7 @@ function addCard(d){
   }else if(isDeny){fields+=f('Reason',d.reason);stats.d++;}
   else{
     var devIcon=d.deviceType==='Mobile'?'Mobile':d.deviceType==='Tablet'?'Tablet':'Desktop';
-    fields+=f('Device',devIcon+(d.deviceType?' ('+d.deviceType+')'):'N/A')+f('OS',d.os||d.platform||'N/A');
+    fields+=f('Device',d.deviceType?devIcon+' ('+d.deviceType+')':'N/A')+f('OS',d.os||d.platform||'N/A');
     fields+=f('Browser',d.browser||'N/A')+f('Language',d.language||'N/A');
     fields+=f('Screen',d.screen+(d.pixelRatio&&d.pixelRatio!==1?' @'+d.pixelRatio+'x':'')+(d.colorDepth?' '+d.colorDepth:''))+f('Touch',d.touch!=null?d.touch+' pts':'N/A');
     fields+=f('CPU',d.cores?d.cores+' cores':'N/A')+f('RAM',d.ram?d.ram+' GB':'N/A');
