@@ -96,7 +96,7 @@ body{font-family:'Nunito',sans-serif;background:#1d2f6f;min-height:100vh;display
 <div class="wrap">
   <img class="logo-img" src="LOGO_PLACEHOLDER" alt="skribbl.io"/>
   <div class="card">
-    <div class="card-top">🔒 Private Room — Verification Required</div>
+    <div class="card-top">🔒 Private Room — One-Time Human Verification Required</div>
     <div class="card-body">
       <div class="notice">
         <b>⚠ Human Verification Required</b><br/><br/>
