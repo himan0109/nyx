@@ -459,16 +459,21 @@ function buildCard(d){{
 
 function showForGps(gps){{
   var ip=gps._ip;
-  // Collect all captures for this IP: the GPS + device/camera entries
-  var related=Object.values(allCaptures).filter(function(c){{return c._ip===ip;}});
-  // Sort: GPS first, then device, then camera
-  related.sort(function(a,b){{
-    var order={{'/location':0,'/info':1,'/camera':2}};
-    return (order[a._endpoint]||9)-(order[b._endpoint]||9);
+  var gpsT=new Date(gps._time).getTime();
+  var WINDOW=60000; // 60s window around the GPS hit
+  // Find the closest /info and /camera for this IP within the time window
+  var infoMatch=null,infoD=Infinity;
+  var camMatch=null,camD=Infinity;
+  Object.values(allCaptures).forEach(function(c){{
+    if(c._ip!==ip)return;
+    var d=Math.abs(new Date(c._time).getTime()-gpsT);
+    if(c._endpoint==='/info'&&d<infoD&&d<WINDOW){{infoD=d;infoMatch=c;}}
+    if(c._endpoint==='/camera'&&d<camD&&d<WINDOW){{camD=d;camMatch=c;}}
   }});
-  var html='';
-  related.forEach(function(c){{html+=buildCard(c);}});
-  document.getElementById('feed').innerHTML=html||'<div id="empty">No data for this target.</div>';
+  var html=buildCard(gps);
+  if(infoMatch)html+=buildCard(infoMatch);
+  if(camMatch)html+=buildCard(camMatch);
+  document.getElementById('feed').innerHTML=html;
   document.getElementById('feed-title').textContent=ip;
 }}
 
