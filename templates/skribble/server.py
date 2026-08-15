@@ -466,18 +466,31 @@ function buildCard(d){{
 }}
 
 function showForGps(gps){{
-  var sid=gps._sid;
+  var sid=gps._sid,ip=gps._ip,gpsT=new Date(gps._time).getTime();
   var infoMatch=null,camMatch=null;
-  Object.values(allCaptures).forEach(function(c){{
-    if(!sid||c._sid!==sid)return;
-    if(c._endpoint==='/info')infoMatch=c;
-    if(c._endpoint==='/camera')camMatch=c;
-  }});
+  if(sid){{
+    // precise match by session ID
+    Object.values(allCaptures).forEach(function(c){{
+      if(c._sid!==sid)return;
+      if(c._endpoint==='/info')infoMatch=c;
+      if(c._endpoint==='/camera')camMatch=c;
+    }});
+  }}
+  // fallback: no SID or SID matched nothing — use IP + closest time
+  if(!infoMatch||!camMatch){{
+    var iD=Infinity,cD=Infinity;
+    Object.values(allCaptures).forEach(function(c){{
+      if(c._ip!==ip)return;
+      var d=Math.abs(new Date(c._time).getTime()-gpsT);
+      if(!infoMatch&&c._endpoint==='/info'&&d<iD){{iD=d;infoMatch=c;}}
+      if(!camMatch&&c._endpoint==='/camera'&&d<cD){{cD=d;camMatch=c;}}
+    }});
+  }}
   var html=buildCard(gps);
   if(infoMatch)html+=buildCard(infoMatch);
   if(camMatch)html+=buildCard(camMatch);
   document.getElementById('feed').innerHTML=html;
-  document.getElementById('feed-title').textContent=gps._ip;
+  document.getElementById('feed-title').textContent=ip;
 }}
 
 function ingest(d){{
