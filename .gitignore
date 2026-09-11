@@ -6,3 +6,7 @@ templates/skribble/logo.gif
 templates/skribble/leaflet.js
 templates/skribble/leaflet.css
 templates/skribble/world.geojson
+templates/skribble/captures/
+templates/skribble/*.log
+templates/skribble/config.txt
+output/sessions/
